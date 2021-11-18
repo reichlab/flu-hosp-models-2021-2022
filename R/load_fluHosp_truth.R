@@ -1,23 +1,37 @@
 #' Title load_fluHosp_truth
 #'
-#' @param target_variable column name in epidata, default to "previous_day_admission_influenza_confirmed"
-#' @param as_of the date of retrieval or version date, default to current date
-#' @param truth_date a single or a set of truth dates, default to the most recent Monday 
+#' @param as_of the version date, default to current date - 1
+#' @param truth_date a single or a set of truth dates for daily resolution, or a vector of a start date and end date 
+#'                   for weekly resolution. If a start date is not a Sunday, get the previous Sunday. If an end date is not 
+#'                   Sunday, get the Saturday of the epiweek that an end date belongs to.  Default to the most recent 
+#'                   available Sunday if temporal_resolution is daily or to the most recent full week if temporal_resolution 
+#'                   is weekly 
 #' @param locations an abbreviation of a state name or a set of abbreviations of state names, default to all states
+#' @param temporal_resolution either "weekly" or "daily"
 #'
 #' @return a data frame with a column  for each parameter
 load_fluHosp_truth <- function(
-                       target_variable = NULL,
+#                       target_variable = NULL,
                        as_of = NULL,
                        truth_date = NULL,
-                       locations = NULL){
+                       locations = NULL,
+                       temporal_resolution="daily"){
   # libraries
   library(tidyverse)
   library(lubridate)
   library(purrr)
   library(data.table)
-  # for now default source to epidata
   library(httr)
+  # A module for DELPHI's Epidata API.
+  #
+  # https://github.com/cmu-delphi/delphi-epidata
+  #
+  # Notes:
+  #  - Requires the `httr` library.
+  
+  # External libraries
+  library(httr)
+  
   
   # Because the API is stateless, the Epidata class only contains static methods
   Epidata <- (function() {
@@ -25,7 +39,7 @@ load_fluHosp_truth <- function(
     # API base url
     BASE_URL <- 'https://delphi.cmu.edu/epidata/api.php'
     
-    client_version <- '0.3.0'
+    client_version <- '0.3.1'
     
     # Helper function to cast values and/or ranges to strings
     .listitem <- function(value) {
@@ -64,6 +78,458 @@ load_fluHosp_truth <- function(
       return(list(from=from, to=to))
     }
     
+    # Fetch FluView data
+    fluview <- function(regions, epiweeks, issues, lag, auth) {
+      # Check parameters
+      if(missing(regions) || missing(epiweeks)) {
+        stop('`regions` and `epiweeks` are both required')
+      }
+      if(!missing(issues) && !missing(lag)) {
+        stop('`issues` and `lag` are mutually exclusive')
+      }
+      # Set up request
+      params <- list(
+        endpoint = 'fluview',
+        regions = .list(regions),
+        epiweeks = .list(epiweeks)
+      )
+      if(!missing(issues)) {
+        params$issues <- .list(issues)
+      }
+      if(!missing(lag)) {
+        params$lag <- lag
+      }
+      if(!missing(auth)) {
+        params$auth <- auth
+      }
+      # Make the API call
+      return(.request(params))
+    }
+    
+    # Fetch FluView metadata
+    fluview_meta <- function() {
+      # Set up request
+      params <- list(
+        endpoint = 'fluview_meta'
+      )
+      # Make the API call
+      return(.request(params))
+    }
+    
+    # Fetch FluView virological data
+    fluview_clinical <- function(regions, epiweeks, issues, lag) {
+      # Check parameters
+      if(missing(regions) || missing(epiweeks)) {
+        stop('`regions` and `epiweeks` are both required')
+      }
+      if(!missing(issues) && !missing(lag)) {
+        stop('`issues` and `lag` are mutually exclusive')
+      }
+      # Set up request
+      params <- list(
+        endpoint = 'fluview_clinical',
+        regions = .list(regions),
+        epiweeks = .list(epiweeks)
+      )
+      if(!missing(issues)) {
+        params$issues <- .list(issues)
+      }
+      if(!missing(lag)) {
+        params$lag <- lag
+      }
+      # Make the API call
+      return(.request(params))
+    }
+    
+    # Fetch FluSurv data
+    flusurv <- function(locations, epiweeks, issues, lag) {
+      # Check parameters
+      if(missing(locations) || missing(epiweeks)) {
+        stop('`locations` and `epiweeks` are both required')
+      }
+      if(!missing(issues) && !missing(lag)) {
+        stop('`issues` and `lag` are mutually exclusive')
+      }
+      # Set up request
+      params <- list(
+        endpoint = 'flusurv',
+        locations = .list(locations),
+        epiweeks = .list(epiweeks)
+      )
+      if(!missing(issues)) {
+        params$issues <- .list(issues)
+      }
+      if(!missing(lag)) {
+        params$lag <- lag
+      }
+      # Make the API call
+      return(.request(params))
+    }
+    
+    # Fetch ECDC data
+    ecdc_ili <- function(regions, epiweeks, issues, lag) {
+      # Check parameters
+      if(missing(regions) || missing(epiweeks)) {
+        stop('`regions` and `epiweeks` are both required')
+      }
+      if(!missing(issues) && !missing(lag)) {
+        stop('`issues` and `lag` are mutually exclusive')
+      }
+      # Set up request
+      params <- list(
+        endpoint = 'ecdc_ili',
+        regions = .list(regions),
+        epiweeks = .list(epiweeks)
+      )
+      if(!missing(issues)) {
+        params$issues <- .list(issues)
+      }
+      if(!missing(lag)) {
+        params$lag <- lag
+      }
+      # Make the API call
+      return(.request(params))
+    }
+    
+    # Fetch KCDC data
+    kcdc_ili <- function(regions, epiweeks, issues, lag) {
+      # Check parameters
+      if(missing(regions) || missing(epiweeks)) {
+        stop('`regions` and `epiweeks` are both required')
+      }
+      if(!missing(issues) && !missing(lag)) {
+        stop('`issues` and `lag` are mutually exclusive')
+      }
+      # Set up request
+      params <- list(
+        endpoint = 'kcdc_ili',
+        regions = .list(regions),
+        epiweeks = .list(epiweeks)
+      )
+      if(!missing(issues)) {
+        params$issues <- .list(issues)
+      }
+      if(!missing(lag)) {
+        params$lag <- lag
+      }
+      # Make the API call
+      return(.request(params))
+    }
+    
+    
+    # Fetch Google Flu Trends data
+    gft <- function(locations, epiweeks) {
+      # Check parameters
+      if(missing(locations) || missing(epiweeks)) {
+        stop('`locations` and `epiweeks` are both required')
+      }
+      # Set up request
+      params <- list(
+        endpoint = 'gft',
+        locations = .list(locations),
+        epiweeks = .list(epiweeks)
+      )
+      # Make the API call
+      return(.request(params))
+    }
+    
+    # Fetch Google Health Trends data
+    ght <- function(auth, locations, epiweeks, query) {
+      # Check parameters
+      if(missing(auth) || missing(locations) || missing(epiweeks) || missing(query)) {
+        stop('`auth`, `locations`, `epiweeks`, and `query` are all required')
+      }
+      # Set up request
+      params <- list(
+        endpoint = 'ght',
+        auth = auth,
+        locations = .list(locations),
+        epiweeks = .list(epiweeks),
+        query = query
+      )
+      # Make the API call
+      return(.request(params))
+    }
+    
+    # Fetch HealthTweets data
+    twitter <- function(auth, locations, dates, epiweeks) {
+      # Check parameters
+      if(missing(auth) || missing(locations)) {
+        stop('`auth` and `locations` are both required')
+      }
+      if(!xor(missing(dates), missing(epiweeks))) {
+        stop('exactly one of `dates` and `epiweeks` is required')
+      }
+      # Set up request
+      params <- list(
+        endpoint = 'twitter',
+        auth = auth,
+        locations = .list(locations)
+      )
+      if(!missing(dates)) {
+        params$dates <- .list(dates)
+      }
+      if(!missing(epiweeks)) {
+        params$epiweeks <- .list(epiweeks)
+      }
+      # Make the API call
+      return(.request(params))
+    }
+    
+    # Fetch Wikipedia access data
+    wiki <- function(articles, dates, epiweeks, hours, language='en') {
+      # Check parameters
+      if(missing(articles)) {
+        stop('`articles` is required')
+      }
+      if(!xor(missing(dates), missing(epiweeks))) {
+        stop('exactly one of `dates` and `epiweeks` is required')
+      }
+      # Set up request
+      params <- list(
+        endpoint = 'wiki',
+        articles = .list(articles),
+        language = language
+      )
+      if(!missing(dates)) {
+        params$dates <- .list(dates)
+      }
+      if(!missing(epiweeks)) {
+        params$epiweeks <- .list(epiweeks)
+      }
+      if(!missing(hours)) {
+        params$hours <- .list(hours)
+      }
+      # Make the API call
+      return(.request(params))
+    }
+    
+    # Fetch CDC page hits
+    cdc <- function(auth, epiweeks, locations) {
+      # Check parameters
+      if(missing(auth) || missing(epiweeks) || missing(locations)) {
+        stop('`auth`, `epiweeks`, and `locations` are all required')
+      }
+      # Set up request
+      params <- list(
+        endpoint = 'cdc',
+        auth = auth,
+        epiweeks = .list(epiweeks),
+        locations = .list(locations)
+      )
+      # Make the API call
+      return(.request(params))
+    }
+    
+    # Fetch Quidel data
+    quidel <- function(auth, epiweeks, locations) {
+      # Check parameters
+      if(missing(auth) || missing(epiweeks) || missing(locations)) {
+        stop('`auth`, `epiweeks`, and `locations` are all required')
+      }
+      # Set up request
+      params <- list(
+        endpoint = 'quidel',
+        auth = auth,
+        epiweeks = .list(epiweeks),
+        locations = .list(locations)
+      )
+      # Make the API call
+      return(.request(params))
+    }
+    
+    # Fetch NoroSTAT data (point data, no min/max)
+    norostat <- function(auth, location, epiweeks) {
+      # Check parameters
+      if(missing(auth) || missing(location) || missing(epiweeks)) {
+        stop('`auth`, `location`, and `epiweeks` are all required')
+      }
+      # Set up request
+      params <- list(
+        endpoint = 'norostat',
+        auth = auth,
+        location = location,
+        epiweeks = .list(epiweeks)
+      )
+      # Make the API call
+      return(.request(params))
+    }
+    
+    # Fetch NoroSTAT metadata
+    meta_norostat <- function(auth) {
+      # Check parameters
+      if(missing(auth)) {
+        stop('`auth` is required')
+      }
+      # Set up request
+      params <- list(
+        endpoint = 'meta_norostat',
+        auth = auth
+      )
+      # Make the API call
+      return(.request(params))
+    }
+    
+    # Fetch AFHSB data (point data, no min/max)
+    afhsb <- function(auth, locations, epiweeks, flu_types) {
+      # Check parameters
+      if(missing(auth) || missing(locations) || missing(epiweeks) || missing(flu_types)) {
+        stop('`auth`, `locations`, `epiweeks` and `flu_types` are all required')
+      }
+      # Set up request
+      params <- list(
+        endpoint = 'afhsb',
+        auth = auth,
+        locations = .list(locations),
+        epiweeks = .list(epiweeks),
+        flu_types = .list(flu_types)
+      )
+      # Make the API call
+      return(.request(params))
+    }
+    
+    # Fetch AFHSB metadata
+    meta_afhsb <- function(auth) {
+      # Check parameters
+      if(missing(auth)) {
+        stop('`auth` is required')
+      }
+      # Set up request
+      params <- list(
+        endpoint = 'meta_afhsb',
+        auth = auth
+      )
+      # Make the API call
+      return(.request(params))
+    }
+    
+    # Fetch NIDSS flu data
+    nidss.flu <- function(regions, epiweeks, issues, lag) {
+      # Check parameters
+      if(missing(regions) || missing(epiweeks)) {
+        stop('`regions` and `epiweeks` are both required')
+      }
+      if(!missing(issues) && !missing(lag)) {
+        stop('`issues` and `lag` are mutually exclusive')
+      }
+      # Set up request
+      params <- list(
+        endpoint = 'nidss_flu',
+        regions = .list(regions),
+        epiweeks = .list(epiweeks)
+      )
+      if(!missing(issues)) {
+        params$issues <- .list(issues)
+      }
+      if(!missing(lag)) {
+        params$lag <- lag
+      }
+      # Make the API call
+      return(.request(params))
+    }
+    
+    # Fetch Delphi's forecast
+    delphi <- function(system, epiweek) {
+      # Check parameters
+      if(missing(system) || missing(epiweek)) {
+        stop('`system` and `epiweek` are both required')
+      }
+      # Set up request
+      params <- list(
+        endpoint = 'delphi',
+        system = system,
+        epiweek = epiweek
+      )
+      # Make the API call
+      return(.request(params))
+    }
+    
+    # Fetch Delphi's digital surveillance sensors
+    sensors <- function(auth, names, locations, epiweeks) {
+      # Check parameters
+      if(missing(auth) || missing(names) || missing(locations) || missing(epiweeks)) {
+        stop('`auth`, `names`, `locations`, and `epiweeks` are all required')
+      }
+      # Set up request
+      params <- list(
+        endpoint = 'sensors',
+        auth = auth,
+        names = .list(names),
+        locations = .list(locations),
+        epiweeks = .list(epiweeks)
+      )
+      # Make the API call
+      return(.request(params))
+    }
+    
+    # Fetch Delphi's wILI nowcast
+    nowcast <- function(locations, epiweeks) {
+      # Check parameters
+      if(missing(locations) || missing(epiweeks)) {
+        stop('`locations` and `epiweeks` are both required')
+      }
+      # Set up request
+      params <- list(
+        endpoint = 'nowcast',
+        locations = .list(locations),
+        epiweeks = .list(epiweeks)
+      )
+      # Make the API call
+      return(.request(params))
+    }
+    
+  
+    # Fetch API metadata
+    meta <- function() {
+      return(.request(list(endpoint='meta')))
+    }
+    
+    # Fetch Delphi's COVID-19 Surveillance Streams
+    covidcast <- function(data_source, signals, time_type, geo_type, time_values, geo_value, as_of, issues, lag, format=c("classic","tree"), signal) {
+      # Check parameters
+      if(missing(data_source) || (missing(signals) && missing(signal)) || missing(time_type) || missing(geo_type) || missing(time_values) || missing(geo_value)) {
+        stop('`data_source`, `signals`, `time_type`, `geo_type`, `time_values`, and `geo_value` are all required')
+      }
+      if (missing(signals)) {
+        signals <- signal
+      }
+      if(!missing(issues) && !missing(lag)) {
+        stop('`issues` and `lag` are mutually exclusive')
+      }
+      format <- match.arg(format)
+      # Set up request
+      params <- list(
+        endpoint = 'covidcast',
+        data_source = data_source,
+        signals = .list(signals),
+        time_type = time_type,
+        geo_type = geo_type,
+        time_values = .list(time_values),
+        format = format
+      )
+      if(is.list(geo_value)) {
+        params$geo_values = paste(geo_value, collapse=',')
+      } else {
+        params$geo_value = geo_value
+      }
+      if(!missing(as_of)) {
+        params$as_of <- as_of
+      }
+      if(!missing(issues)) {
+        params$issues <- .list(issues)
+      }
+      if(!missing(lag)) {
+        params$lag <- lag
+      }
+      # Make the API call
+      return(.request(params))
+    }
+    
+    # Fetch Delphi's COVID-19 Surveillance Streams metadata
+    covidcast_meta <- function() {
+      return(.request(list(endpoint='covidcast_meta', cached='true')))
+    }
+    
     # Fetch COVID hospitalization data
     covid_hosp <- function(states, dates, issues) {
       # Check parameters
@@ -83,59 +549,194 @@ load_fluHosp_truth <- function(
       return(.request(params))
     }
     
+    # Fetch COVID hospitalization data for specific facilities
+    covid_hosp_facility <- function(hospital_pks, collection_weeks, publication_dates) {
+      # Check parameters
+      if(missing(hospital_pks) || missing(collection_weeks)) {
+        stop('`hospital_pks` and `collection_weeks` are both required')
+      }
+      # Set up request
+      params <- list(
+        source = 'covid_hosp_facility',
+        hospital_pks = .list(hospital_pks),
+        collection_weeks = .list(collection_weeks)
+      )
+      if(!missing(publication_dates)) {
+        params$publication_dates <- .list(publication_dates)
+      }
+      # Make the API call
+      return(.request(params))
+    }
+    
+    # Lookup COVID hospitalization facility identifiers
+    covid_hosp_facility_lookup <- function(state, ccn, city, zip, fips_code) {
+      # Set up request
+      params <- list(source = 'covid_hosp_facility_lookup')
+      if(!missing(state)) {
+        params$state <- state
+      } else if(!missing(ccn)) {
+        params$ccn <- ccn
+      } else if(!missing(city)) {
+        params$city <- city
+      } else if(!missing(zip)) {
+        params$zip <- zip
+      } else if(!missing(fips_code)) {
+        params$fips_code <- fips_code
+      } else {
+        stop('one of `state`, `ccn`, `city`, `zip`, or `fips_code` is required')
+      }
+      # Make the API call
+      return(.request(params))
+    }
+    
     # Export the public methods
     return(list(
       range = range,
       client_version = client_version,
-      covid_hosp = covid_hosp
+      fluview = fluview,
+      fluview_meta = fluview_meta,
+      fluview_clinical = fluview_clinical,
+      flusurv = flusurv,
+      gft = gft,
+      ght = ght,
+      twitter = twitter,
+      wiki = wiki,
+      cdc = cdc,
+      quidel = quidel,
+      norostat = norostat,
+      meta_norostat = meta_norostat,
+      afhsb = afhsb,
+      meta_afhsb = meta_afhsb,
+      nidss.flu = nidss.flu,
+      delphi = delphi,
+      sensors = sensors,
+      nowcast = nowcast,
+      meta = meta,
+      covidcast = covidcast,
+      covidcast_meta = covidcast_meta,
+      covid_hosp = covid_hosp,
+      covid_hosp_facility = covid_hosp_facility,
+      covid_hosp_facility_lookup = covid_hosp_facility_lookup
     ))
   })()
+  ## load data
+  location_data <- read.table(file = "data/locations.txt", sep=",", header = TRUE)
   #  specify params
   if(missing(locations)){
-    locs <- c("AL", "AK", "AZ", 
-              "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", 
-              "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", 
-              "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", 
-              "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", 
-              "WA", "WV", "WI", "WY", "AS", "GU", "MP", "PR", "UM", "VI", "DC")
+    locs <- as.list(location_data$abbreviation)
   }
   else{
-    locs <- locations
+    # check if fips or abbrev
+    if(any(grepl("[^a-zA-Z]", locations))){
+      formatted_locations <- paste0(0,as.numeric(as.character(locations[grepl("[^a-zA-Z]", locations)])))
+      locs <- c(as.list(locations[!grepl("[^a-zA-Z]", locations)]), 
+                as.list(location_data$abbreviation[which(location_data$location %in% formatted_locations)]))
+    }else{
+      locs <- as.list(locations)
+    }
   }
+  # post-processing dates
+  most_recent_avail <- (Sys.Date()-2)
   if(missing(truth_date)){
-    # set to the most recent monday
-    tdates <- format(floor_date(Sys.Date(), 'week')+1,format="%Y%m%d")
+    # most recent Sunday (sunday+1 due to previous date) 
+    if(temporal_resolution=="daily"){
+      tdates <- as.list(as.numeric(format(most_recent_avail+1,format="%Y%m%d")))
+    }else{
+      # this is sun due to previous date
+      most_recent_sat <- floor_date(Sys.Date(), 'week')
+      if(most_recent_sat>most_recent_avail){
+        tdates <- as.list(
+          as.numeric(
+            format(
+              seq(floor_date(Sys.Date()-7, 'week')-6,floor_date(Sys.Date()-7, 'week'),1),
+              format="%Y%m%d"
+              )
+            )
+          )
+      }else{
+        tdates <- as.list(
+          as.numeric(
+            format(
+              seq(most_recent_sat-6,most_recent_sat,1),
+              format="%Y%m%d"
+              )
+            )
+          )
+      }
+    }
+      
   }else{
-    tdates <- format(as.Date(truth_date),format="%Y%m%d")
+    dates <- as.Date(truth_date)
+    if(temporal_resolution=="daily"){
+      # add warning for too recent date 
+      if(any((dates+1)>most_recent_avail)){
+        avail_dates <- (dates[which((dates+1)<=most_recent_avail)])+1
+        tdates <- as.list(as.numeric(format(avail_dates,format="%Y%m%d")))
+        warning("some dates are too recent")
+      }else{
+        tdates <- as.list(as.numeric(format(dates+1,format="%Y%m%d")))
+      }
+    }else{
+      dates <- sort(dates)
+      # get sunday of epiweek this date belongs to
+      trim_start <- floor_date(dates[1],'week')
+      # get saturday of epiweek this date belongs to
+      trim_end <- ceiling_date(dates[2],'week')-1
+      # valid_range
+      valid_range <- c(trim_start+1,trim_end+1)
+      if(length(truth_date)!=2){
+        stop("truth_date must contain only a start date and an end date for weekly resolution.")
+      }
+      else if(any(valid_range>most_recent_avail)){
+        stop("End date or both end points are too recent.")
+      }
+      # add warning for too recent date 
+      # trim the range to be be Sun to Sat
+      else{
+        tdates <- as.list(as.numeric(format(seq(valid_range[1],valid_range[2],1),format="%Y%m%d")))
+      }
+    }
   }
-  if(missing(as_of)){
+  if(length(as_of)>1){
+    stop("Currently only support a single as-of date.")
+  }
+  if(missing(as_of)||(as.Date(as_of)>(Sys.Date()-1))){
     # set to today
-    issue_date <-  NULL
+    issue_date <-  as.list(as.numeric(format(Sys.Date()-1,format="%Y%m%d")))
   }else{
-    issue_date <- format(as.Date(as_of),format="%Y%m%d")
+    issue_date <- as.list(as.numeric(format(as.Date(as_of),format="%Y%m%d")))
   }
   # format truth dates
   # get data
-  list_results <- lapply(locs, function(x) Epidata$covid_hosp(x,tdates)[['epidata']]) %>%
-     do.call("c",.) %>%
+  list_results <- Epidata$covid_hosp(states=locs,dates=tdates,issues = issue_date)[['epidata']] %>%
      lapply(., function(x) data.frame(t(unlist(x)))) %>%
      purrr::map_dfr(., ~ .x %>%
                as.list %>%
-               as_tibble)
+               as_tibble) %>%
+     dplyr::mutate(date=as.Date(format(strptime(date, "%Y%m%d"),format="%Y-%m-%d"))-1,
+                   value=as.double(previous_day_admission_influenza_confirmed)) %>%
+     dplyr::select("state","date","value")
+  
   #check if  empty
   if(nrow(list_results)==0){
     warning("Empty truth data, please check your parameters.")
   }
-  # second round of filtering
-  if(missing(target_variable)){
-    tar <- "previous_day_admission_influenza_confirmed"
+  if(temporal_resolution=="daily"){
+    truth_data <- list_results 
   }else{
-    tar <- target_variable
+    # most recent Sat data
+    truth_data <- list_results %>%
+      dplyr::mutate(week=paste0(epiweek(date),"-",year(date))) %>%
+      dplyr::group_by(state,week) %>%
+      dplyr::mutate(value = sum(value,na.rm = TRUE)) %>%
+      dplyr::filter(date==floor_date(date,'week')) %>%
+      dplyr::ungroup() %>%
+      dplyr::select(-"week") %>%
+      as.data.frame()
   }
-  # have to give an warning if the column does not exist
-  #for particular dates & locs or user should just check?
-  truth_data <- list_results%>%
-   dplyr::select(c("state","issue","date",all_of(tar)))
-  return(truth_data )
+  truth_data <- truth_data %>%
+    dplyr::left_join(location_data, by=c("state"="abbreviation")) %>%
+    dplyr::select(-c("population","state"))
+  return(truth_data)
 }
 
