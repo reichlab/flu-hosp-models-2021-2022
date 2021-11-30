@@ -1,16 +1,9 @@
 # examples of how to use load_fluHosp_truth() function
-source("./R/load_fluHosp_truth.R")
+source("./R/load_flu_hosp_data.R")
 
-# default will build a dataframe with 1 row for each state for the most recent Monday (and the most recent issue date)
-fluHosp_default<- load_fluHosp_truth()
-# this is the result for MA with a specified truth date and a default issue date (the most recent issue date in epidata)
-fluHosp1<- load_fluHosp_truth(locations="MA",truth_date="2021-11-01")
-# the result for 3 states for a range of dates
-fluHosp2<- load_fluHosp_truth(locations=c("MA","CA","MD"),truth_date=c("2021-05-29","2021-11-01","2021-11-10"))
-# the weekly result for MA 
-fluHosp3<- load_fluHosp_truth(locations="MA",truth_date=c("2021-05-01","2021-11-01"),temporal_resolution = "weekly")
-# the weekly result for 3 states 
-fluHosp4<- load_fluHosp_truth(locations="MA",truth_date=c("2021-05-01","2021-11-01"),temporal_resolution = "weekly")
+# default options for all arguments 
+fluHosp_default<- load_flu_hosp_data(temporal_resolution="weekly")
+fluHosp_default_daily<- load_flu_hosp_data(temporal_resolution="daily")
+# the result for 3 states 
+fluHosp1<- load_flu_hosp_data(locations=c("MA","CA","MD"),temporal_resolution="weekly")
 
-# currently return date as the first date of a week for weekly res, maybe another date?
-# order date, value, location,location name - work?
