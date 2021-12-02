@@ -8,7 +8,7 @@
 #' @param temporal_resolution "daily" or "weekly"
 #' @param na.rm boolean indicating whether NA values should be dropped when
 #'   aggregating state-level values and calculating weekly totals. Defaults to
-#'   `TRUE`
+#'   `FALSE`
 #'
 #' @return data frame of flu incidence with columns date, location,
 #'   location_name, value
@@ -19,10 +19,6 @@ load_flu_hosp_data <- function(as_of = NULL,
   library(dplyr)
   library(readr)
   library(tidyverse)
-  
-  # temporarily override option for dplyr.summarise.inform to suppress messages
-  # will reset this at end of function
-  orig_options <- options(dplyr.summarise.inform = FALSE)
   
   # load location data
   location_data <- readr::read_csv(file = "data/locations.csv",
@@ -71,7 +67,7 @@ load_flu_hosp_data <- function(as_of = NULL,
   if (locations_to_fetch == "*") {
     us_dat <- state_dat %>%
       dplyr::group_by(epiyear, epiweek, date) %>%
-      dplyr::summarize(value = sum(value, na.rm = na.rm)) %>%
+      dplyr::summarize(value = sum(value, na.rm = na.rm), .groups = "drop") %>%
       dplyr::mutate(geo_value = "us") %>%
       dplyr::ungroup() %>%
       dplyr::select(geo_value, epiyear, epiweek, date, value)
@@ -93,7 +89,8 @@ load_flu_hosp_data <- function(as_of = NULL,
       dplyr::summarize(
         date = max(date),
         num_days = n(),
-        value = sum(value, na.rm = na.rm)
+        value = sum(value, na.rm = na.rm),
+        .groups = "drop"
       ) %>%
       dplyr::filter(num_days == 7L) %>%
       dplyr::ungroup() %>%
@@ -105,9 +102,6 @@ load_flu_hosp_data <- function(as_of = NULL,
     # drop data for locations retrieved from covidcast,
     # but not included in forecasting exercise -- mainly American Samoa
     dplyr::filter(!is.na(location))
-  
-  # reset original options
-  options(orig_options)
   
   return(final_data)
 }
