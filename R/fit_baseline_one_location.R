@@ -61,8 +61,8 @@ get_baseline_predictions <- function(location_data,
   ## truncate to start at the first date of the first target week
   predictions <-
     sapply(1:4, function(i)
-      rowSums(daily_predictions[, -c(1:h_adjust)][, ((7 * (i - 1)) + 1):(7 *
-                                                                           i)]))
+      rowSums(daily_predictions[,-c(1:h_adjust)][, ((7 * (i - 1)) + 1):(7 *
+                                                                          i)]))
   
   # extract predictive quantiles, intervals, and medians
   quantiles_df <- get_quantiles_df(predictions, taus)
@@ -72,7 +72,7 @@ get_baseline_predictions <- function(location_data,
 
 #' Outlier correction and fitting baseline
 #'
-#' @param  forecast_week_end_date the date of the Sunday of the forecast week
+#' @param  reference_date the date of the Saturday relative to which week-ahead targets are defined
 #' @param  location_data data frame containing flu hospitalizations for a single location. Must contain
 #'   geo_value, time_value, and value columns.
 #' @param  transformation can be either "none" or "sqrt" or  both.
@@ -81,7 +81,7 @@ get_baseline_predictions <- function(location_data,
 #' @param  taus probability levels
 #'
 #' @return data frame of a baseline forecast for one location
-fit_baseline_one_location <- function(forecast_week_end_date,
+fit_baseline_one_location <- function(reference_date,
                                       location_data,
                                       transformation,
                                       symmetrize,
@@ -126,9 +126,10 @@ fit_baseline_one_location <- function(forecast_week_end_date,
     )
   )
   # figure out daily horizons to forecast
-  forecast_week_end_date <- lubridate::ymd(forecast_week_end_date)
+  reference_date <- lubridate::ymd(reference_date)
+  forecast_date <- reference_date + 2
   last_data_date <- max(location_data$time_value)
-  last_target_date <- forecast_week_end_date + 2 + 28L
+  last_target_date <- forecast_date + 28L
   effective_horizon <- as.integer(last_target_date - last_data_date)
   h_adjustments <- as.integer(effective_horizon - 28L)
   # set baseline variations to fit
@@ -199,9 +200,10 @@ fit_baseline_one_location <- function(forecast_week_end_date,
     dplyr::bind_cols(variations_to_fit, predictions) %>%
     tidyr::unnest(quantiles_df) %>%
     dplyr::transmute(
-      forecast_date = as.character(forecast_week_end_date + 2),
+      forecast_date = as.character(forecast_date),
       target = paste0(h, " wk ahead inc flu hosp"),
-      target_end_date = as.character(forecast_week_end_date +
+      target_end_date = as.character(reference_date
+                                     +
                                        7L * h),
       abbreviation = toupper(unique(location_data$geo_value)),
       type = 'quantile',
