@@ -6,6 +6,7 @@ library(tidyr)
 library(ggplot2)
 library(simplets)
 library(covidHubUtils)
+library(hubEnsembles)
 library(ggforce)
 # library(here)
 # setwd(here())
@@ -51,7 +52,7 @@ quantile_forecasts <-
                        window_size_variation,
                        required_quantiles
                      )
-                   
+
                  }) %>%
   dplyr::left_join(required_locations, by = "abbreviation") %>%
   dplyr::select(forecast_date,
@@ -64,7 +65,7 @@ quantile_forecasts <-
                 model)
 
 model_number <- length(unique(quantile_forecasts$model))
-model_names <- unique(quantile_forecasts$model)
+model_names <- c(unique(quantile_forecasts$model), "baseline_ensemble")
 model_folders <-
   paste0('/UMassCoE-',
          model_names,
@@ -76,6 +77,8 @@ results_paths <-
   paste0('weekly-submission/forecasts', model_folders, '.csv')
 plot_paths <-
   paste0('weekly-submission/baseline-plots', model_folders, '.pdf')
+
+# save all the baseline models in hub format
 for (i in 1:model_number) {
   model_name <- model_names[i]
   # set path
@@ -84,21 +87,62 @@ for (i in 1:model_number) {
     dplyr::filter(model == model_name) %>%
     dplyr::select(-"model")
   write.csv(model_forecasts, file = results_path, row.names = FALSE)
+}
+
+# load them back in to a single data.frame having columns required by
+# build_quantile_ensemble and plot_forecasts
+all_baselines <- covidHubUtils::load_forecasts_repo(
+  file_path = paste0('weekly-submission/forecasts/'),
+  models = paste0('UMassCoE-', model_names[1:model_number]),
+  forecast_dates = forecast_date,
+  locations = NULL,
+  types = NULL,
+  targets = NULL,
+  hub = "FluSight",
+  verbose = TRUE
+)
+
+# build ensemble
+baseline_ensemble <- hubEnsembles::build_quantile_ensemble(
+  all_baselines,
+  forecast_date = forecast_date,
+  model_name = "baseline_ensemble"
+)
+
+# save ensemble in hub format
+write.csv(baseline_ensemble %>% dplyr::transmute(
+  forecast_date = forecast_date,
+  target = paste(horizon, temporal_resolution, "ahead", target_variable),
+  target_end_date = target_end_date,
+  location = location,
+  type = type,
+  quantile = quantile,
+  value = value),
+file = results_paths[model_number + 1],
+row.names = FALSE)
+
+# load ensemble back in and bind with other baselines for plotting
+all_baselines <- dplyr::bind_rows(
+  all_baselines,
+  covidHubUtils::load_forecasts_repo(
+  file_path = paste0('weekly-submission/forecasts/'),
+  models = paste0('UMassCoE-', model_names[model_number + 1]),
+  forecast_dates = forecast_date,
+  locations = NULL,
+  types = NULL,
+  targets = NULL,
+  hub = "FluSight",
+  verbose = TRUE
+)
+)
+
+for (i in 1:(model_number + 1)) {
   # plot
   plot_path <- plot_paths[i]
-  f <- covidHubUtils::load_forecasts_repo(
-    file_path = paste0('weekly-submission/forecasts/'),
-    models = paste0('UMassCoE-', model_names[i]),
-    forecast_dates = forecast_date,
-    locations = NULL,
-    types = NULL,
-    targets = NULL,
-    hub = "FluSight",
-    verbose = TRUE
-  )
   p <-
     covidHubUtils::plot_forecasts(
-      forecast_data = f,
+      forecast_data = all_baselines %>% 
+        dplyr::filter(model == paste0('UMassCoE-',model_names[i])),
       facet = "~location",
       hub = "FluSight",
       truth_source = "HealthData",
