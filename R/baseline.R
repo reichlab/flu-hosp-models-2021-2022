@@ -25,8 +25,11 @@ required_locations <-
 # even if we are delayed and create it Tuesday morning.
 reference_date <- as.character(lubridate::floor_date(Sys.Date(), unit = "week") - 1)
 forecast_date <- as.character(as.Date(reference_date) + 2)
+temporal_resolution <- "weekly"
 # Load data
-data <- load_flu_hosp_data(as_of = forecast_date) %>%
+data <- load_flu_hosp_data(
+    as_of = forecast_date,
+    temporal_resolution = temporal_resolution ) %>%
   dplyr::left_join(required_locations, by = "location") %>%
   dplyr::mutate(geo_value = tolower(abbreviation)) %>%
   dplyr::select(geo_value, time_value = date, value)
@@ -35,7 +38,7 @@ location_number <- length(required_locations$abbreviation)
 # set variation of baseline to fit
 transformation_variation <- c("none", "sqrt")
 symmetrize_variation <- c(TRUE, FALSE)
-window_size_variation <- 28
+window_size_variation <- 5
 # fit baseline models
 reference_date <- lubridate::ymd(reference_date)
 quantile_forecasts <-
@@ -50,9 +53,9 @@ quantile_forecasts <-
                        transformation_variation,
                        symmetrize_variation,
                        window_size_variation,
+                       temporal_resolution,
                        required_quantiles
                      )
-
                  }) %>%
   dplyr::left_join(required_locations, by = "abbreviation") %>%
   dplyr::select(forecast_date,
@@ -62,21 +65,21 @@ quantile_forecasts <-
                 type,
                 quantile,
                 value,
-                model)
+                model) %>%
+  dplyr::mutate(model = paste0(model, "_", temporal_resolution))
 
 model_number <- length(unique(quantile_forecasts$model))
-model_names <- c(unique(quantile_forecasts$model), "baseline_ensemble")
-model_folders <-
-  paste0('/UMassCoE-',
-         model_names,
-         '/',
-         forecast_date,
-         '-UMassCoE-',
-         model_names)
-results_paths <-
-  paste0('weekly-submission/forecasts', model_folders, '.csv')
-plot_paths <-
-  paste0('weekly-submission/baseline-plots', model_folders, '.pdf')
+model_names <- c(unique(quantile_forecasts$model),
+                 paste0("baseline_ensemble-", temporal_resolution))
+results_folders <- paste0(
+  'weekly-submission/forecasts/UMassCoE-', model_names, "/")
+plots_folders <- paste0(
+  'weekly-submission/baseline-plots/UMassCoE-', model_names, "/")
+for (folder in c(results_folders, plots_folders)) {
+  if (!file.exists(folder)) dir.create(folder, recursive = TRUE)
+}
+results_paths <- paste0(results_folders, forecast_date, "-UMassCoE-", model_names, '.csv')
+plot_paths <- paste0(plots_folders, forecast_date, "-UMassCoE-", model_names, '.pdf')
 
 # save all the baseline models in hub format
 for (i in 1:model_number) {
@@ -136,15 +139,25 @@ all_baselines <- dplyr::bind_rows(
 )
 )
 
+truth_for_plotting <- data %>% dplyr::mutate(abbreviation = toupper(geo_value)) %>%
+  dplyr::left_join(hub_locations_flusight, by = "abbreviation") %>%
+  dplyr::transmute(
+    model = "Observed Data (HealthData)",
+    location = fips,
+    target_end_date = time_value,
+    target_variable = "inc flu hosp",
+    value = value)
+
 for (i in 1:(model_number + 1)) {
   # plot
   plot_path <- plot_paths[i]
   p <-
     covidHubUtils::plot_forecasts(
-      forecast_data = all_baselines %>% 
+      forecast_data = all_baselines %>%
         dplyr::filter(model == paste0('UMassCoE-',model_names[i])),
       facet = "~location",
       hub = "FluSight",
+      truth_data = truth_for_plotting,
       truth_source = "HealthData",
       subtitle = "none",
       title = "none",
