@@ -21,12 +21,13 @@ required_locations <-
   dplyr::select("location", "abbreviation")
 # The reference_date is the date of the Saturday relative to which week-ahead targets are defined.
 # The forecast_date is the Monday of forecast creation.
-# The forecast creation date is set to a Monday,
-# even if we are delayed and create it Tuesday morning.
-reference_date <- as.character(lubridate::floor_date(Sys.Date(), unit = "week") - 1)
+# This cannot be run on a later date unless source is set to covidcast with as_of == forecast_date
+
+reference_date <-
+  as.character(lubridate::floor_date(Sys.Date(), unit = "week") - 1)
 forecast_date <- as.character(as.Date(reference_date) + 2)
 # Load data
-data <- load_flu_hosp_data(as_of = forecast_date) %>%
+data <- load_flu_hosp_data(as_of = NULL) %>%
   dplyr::left_join(required_locations, by = "location") %>%
   dplyr::mutate(geo_value = tolower(abbreviation)) %>%
   dplyr::select(geo_value, time_value = date, value)
@@ -35,7 +36,7 @@ location_number <- length(required_locations$abbreviation)
 # set variation of baseline to fit
 transformation_variation <- c("none", "sqrt")
 symmetrize_variation <- c(TRUE, FALSE)
-window_size_variation <- 28
+window_size_variation <- c(14, 21, 28)
 # fit baseline models
 reference_date <- lubridate::ymd(reference_date)
 quantile_forecasts <-
@@ -52,7 +53,7 @@ quantile_forecasts <-
                        window_size_variation,
                        required_quantiles
                      )
-
+                   
                  }) %>%
   dplyr::left_join(required_locations, by = "abbreviation") %>%
   dplyr::select(forecast_date,
@@ -65,7 +66,8 @@ quantile_forecasts <-
                 model)
 
 model_number <- length(unique(quantile_forecasts$model))
-model_names <- c(unique(quantile_forecasts$model), "baseline_ensemble")
+model_names <-
+  c(unique(quantile_forecasts$model), "baseline_ensemble")
 model_folders <-
   paste0('/UMassCoE-',
          model_names,
@@ -75,8 +77,8 @@ model_folders <-
          model_names)
 results_paths <-
   paste0('weekly-submission/forecasts', model_folders, '.csv')
-plot_paths <-
-  paste0('weekly-submission/baseline-plots', model_folders, '.pdf')
+# plot_paths <-
+#   paste0('weekly-submission/baseline-plots', model_folders, '.pdf')
 
 # save all the baseline models in hub format
 for (i in 1:model_number) {
@@ -103,95 +105,89 @@ all_baselines <- covidHubUtils::load_forecasts_repo(
 )
 
 # build ensemble
-baseline_ensemble <- hubEnsembles::build_quantile_ensemble(
-  all_baselines,
-  forecast_date = forecast_date,
-  model_name = "baseline_ensemble"
-)
+temporal_resolution <- "wk"
+baseline_ensemble <- hubEnsembles::build_quantile_ensemble(all_baselines,
+                                                           forecast_date = forecast_date,
+                                                           model_name = "baseline_ensemble")
 
 # save ensemble in hub format
-write.csv(baseline_ensemble %>% dplyr::transmute(
-  forecast_date = forecast_date,
-  target = paste(horizon, temporal_resolution, "ahead", target_variable),
-  target_end_date = target_end_date,
-  location = location,
-  type = type,
-  quantile = quantile,
-  value = value),
-file = results_paths[model_number + 1],
-row.names = FALSE)
+write.csv(
+  baseline_ensemble %>% dplyr::transmute(
+    forecast_date = forecast_date,
+    target = paste(horizon, temporal_resolution, "ahead", target_variable),
+    target_end_date = target_end_date,
+    location = location,
+    type = type,
+    quantile = quantile,
+    value = value
+  ),
+  file = results_paths[model_number + 1],
+  row.names = FALSE
+)
 
-# load ensemble back in and bind with other baselines for plotting
-all_baselines <- dplyr::bind_rows(
-  all_baselines,
+# load ensemble back in for plotting
+baseline_ensemble <-
   covidHubUtils::load_forecasts_repo(
-  file_path = paste0('weekly-submission/forecasts/'),
-  models = paste0('UMassCoE-', model_names[model_number + 1]),
-  forecast_dates = forecast_date,
-  locations = NULL,
-  types = NULL,
-  targets = NULL,
-  hub = "FluSight",
-  verbose = TRUE
-)
-)
+    file_path = paste0('weekly-submission/forecasts/'),
+    models = 'UMassCoE-trends_ensemble',
+    forecast_dates = forecast_date,
+    locations = NULL,
+    types = NULL,
+    targets = NULL,
+    hub = "FluSight",
+    verbose = TRUE
+  )
 
-for (i in 1:(model_number + 1)) {
-  # plot
-  plot_path <- plot_paths[i]
-  p <-
-    covidHubUtils::plot_forecasts(
-      forecast_data = all_baselines %>% 
-        dplyr::filter(model == paste0('UMassCoE-',model_names[i])),
-      facet = "~location",
-      hub = "FluSight",
-      truth_source = "HealthData",
-      subtitle = "none",
-      title = "none",
-      show_caption = FALSE,
-      plot = FALSE
-    ) +
-    scale_x_date(
-      breaks = "1 month",
-      date_labels = "%b-%y",
-      limits = as.Date(c(
-        reference_date - (7 * 32), reference_date + 28
-      ), format = "%b-%y")
-    ) +
-    theme_update(
-      legend.position = "bottom",
-      legend.direction = "vertical",
-      legend.text = element_text(size = 8),
-      legend.title = element_text(size = 8),
-      axis.text.x = element_text(angle = 90),
-      axis.title.x = element_blank()
-    ) +
-    ggforce::facet_wrap_paginate(
+# plot
+plot_path <-
+  'weekly-submission/baseline-plots/UMassCoE-trends_ensemble.pdf'
+p <-
+  covidHubUtils::plot_forecasts(
+    forecast_data = baseline_ensemble,
+    facet = "~location",
+    hub = "FluSight",
+    truth_source = "HealthData",
+    subtitle = "none",
+    title = "none",
+    show_caption = FALSE,
+    plot = FALSE
+  ) +
+  scale_x_date(
+    breaks = "1 month",
+    date_labels = "%b-%y",
+    limits = as.Date(c(
+      reference_date - (7 * 32), reference_date + 28
+    ), format = "%b-%y")
+  ) +
+  theme_update(
+    legend.position = "bottom",
+    legend.direction = "vertical",
+    legend.text = element_text(size = 8),
+    legend.title = element_text(size = 8),
+    axis.text.x = element_text(angle = 90),
+    axis.title.x = element_blank()
+  ) +
+  ggforce::facet_wrap_paginate(
+    ~ location,
+    scales = "free",
+    ncol = 2,
+    nrow = 3,
+    page = 1
+  )
+n <- n_pages(p)
+pdf(plot_path,
+    paper = 'A4',
+    width = 205 / 25,
+    height = 270 / 25)
+for (i in 1:n) {
+  suppressWarnings(print(
+    p + ggforce::facet_wrap_paginate(
       ~ location,
       scales = "free",
       ncol = 2,
       nrow = 3,
-      page = 1
+      page = i
     )
-  n <- n_pages(p)
-  pdf(
-    plot_path,
-    paper = 'A4',
-    width = 205 / 25,
-    height = 270 / 25
-  )
-  for (i in 1:n) {
-    suppressWarnings(print(
-      p + ggforce::facet_wrap_paginate(
-        ~ location,
-        scales = "free",
-        ncol = 2,
-        nrow = 3,
-        page = i
-      )
-    ))
-  }
-  dev.off()
+  ))
 }
-
-
+dev.off()
