@@ -19,13 +19,14 @@ required_quantiles <-
 required_locations <-
   readr::read_csv(file = "./data/locations.csv") %>%
   dplyr::select("location", "abbreviation")
+
 # The reference_date is the date of the Saturday relative to which week-ahead targets are defined.
 # The forecast_date is the Monday of forecast creation.
 # This cannot be run on a later date unless source is set to covidcast with as_of == forecast_date
-
 reference_date <-
   as.character(lubridate::floor_date(Sys.Date(), unit = "week") - 1)
 forecast_date <- as.character(as.Date(reference_date) + 2)
+
 # Load data
 data <- load_flu_hosp_data(as_of = NULL) %>%
   dplyr::left_join(required_locations, by = "location") %>%
@@ -33,10 +34,12 @@ data <- load_flu_hosp_data(as_of = NULL) %>%
   dplyr::select(geo_value, time_value = date, value)
 
 location_number <- length(required_locations$abbreviation)
+
 # set variation of baseline to fit
 transformation_variation <- c("none", "sqrt")
 symmetrize_variation <- c(TRUE, FALSE)
 window_size_variation <- c(14, 21, 28)
+
 # fit baseline models
 reference_date <- lubridate::ymd(reference_date)
 quantile_forecasts <-
@@ -53,7 +56,6 @@ quantile_forecasts <-
                        window_size_variation,
                        required_quantiles
                      )
-                   
                  }) %>%
   dplyr::left_join(required_locations, by = "abbreviation") %>%
   dplyr::select(forecast_date,
@@ -67,18 +69,25 @@ quantile_forecasts <-
 
 model_number <- length(unique(quantile_forecasts$model))
 model_names <-
-  c(unique(quantile_forecasts$model), "baseline_ensemble")
-model_folders <-
-  paste0('/UMassCoE-',
-         model_names,
-         '/',
-         forecast_date,
-         '-UMassCoE-',
-         model_names)
-results_paths <-
-  paste0('weekly-submission/forecasts', model_folders, '.csv')
-# plot_paths <-
-#   paste0('weekly-submission/baseline-plots', model_folders, '.pdf')
+  c(unique(quantile_forecasts$model), "trends_ensemble")
+model_folders <- file.path(
+  "weekly-submission/forecasts",
+  paste0("UMass-", model_names)
+)
+
+for (model_folder in model_folders) {
+  if (!dir.exists(model_folder)) {
+    dir.create(model_folder, recursive = TRUE)
+  }
+}
+
+results_paths <- file.path(
+  model_folders,
+  paste0(
+    forecast_date,
+    "-UMass-",
+    model_names,
+    ".csv"))
 
 # save all the baseline models in hub format
 for (i in 1:model_number) {
@@ -94,8 +103,8 @@ for (i in 1:model_number) {
 # load them back in to a single data.frame having columns required by
 # build_quantile_ensemble and plot_forecasts
 all_baselines <- covidHubUtils::load_forecasts_repo(
-  file_path = paste0('weekly-submission/forecasts/'),
-  models = paste0('UMassCoE-', model_names[1:model_number]),
+  file_path = paste0("weekly-submission/forecasts/"),
+  models = paste0("UMass-", model_names[1:model_number]),
   forecast_dates = forecast_date,
   locations = NULL,
   types = NULL,
@@ -108,7 +117,7 @@ all_baselines <- covidHubUtils::load_forecasts_repo(
 temporal_resolution <- "wk"
 baseline_ensemble <- hubEnsembles::build_quantile_ensemble(all_baselines,
                                                            forecast_date = forecast_date,
-                                                           model_name = "baseline_ensemble")
+                                                           model_name = "trends_ensemble")
 
 # save ensemble in hub format
 write.csv(
@@ -128,8 +137,8 @@ write.csv(
 # load ensemble back in for plotting
 baseline_ensemble <-
   covidHubUtils::load_forecasts_repo(
-    file_path = paste0('weekly-submission/forecasts/'),
-    models = 'UMassCoE-trends_ensemble',
+    file_path = paste0("weekly-submission/forecasts/"),
+    models = "UMass-trends_ensemble",
     forecast_dates = forecast_date,
     locations = NULL,
     types = NULL,
@@ -140,7 +149,10 @@ baseline_ensemble <-
 
 # plot
 plot_path <-
-  'weekly-submission/baseline-plots/UMassCoE-trends_ensemble.pdf'
+  "weekly-submission/baseline-plots/UMass-trends_ensemble.pdf"
+if (!dir.exists("weekly-submission/baseline-plots/")) {
+  dir.create("weekly-submission/baseline-plots/", recursive = TRUE)
+}
 p <-
   covidHubUtils::plot_forecasts(
     forecast_data = baseline_ensemble,
@@ -176,7 +188,7 @@ p <-
   )
 n <- n_pages(p)
 pdf(plot_path,
-    paper = 'A4',
+    paper = "A4",
     width = 205 / 25,
     height = 270 / 25)
 for (i in 1:n) {

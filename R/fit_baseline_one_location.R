@@ -54,6 +54,22 @@ get_baseline_predictions <- function(location_data,
   daily_predictions <-
     predict(baseline_fit, nsim = 100000, horizon = daily_horizons)
   
+  if (h_adjust < 0) {
+    # augment with observed leading data
+    daily_predictions <- cbind(
+      matrix(
+        tail(location_data[[response_var]], abs(h_adjust)),
+        nrow = 100000,
+        ncol = abs(h_adjust),
+        byrow = TRUE),
+      daily_predictions
+    )
+    h_adjust <- 0L
+  } else if (h_adjust > 0) {
+    # drop extra forecasts at the beginning
+    daily_predictions <- daily_predictions[, -seq_len(h_adjust)]
+  }
+  
   # truncate to non-negative
   daily_predictions <- pmax(daily_predictions, 0)
   
@@ -61,8 +77,8 @@ get_baseline_predictions <- function(location_data,
   ## truncate to start at the first date of the first target week
   predictions <-
     sapply(1:4, function(i)
-      rowSums(daily_predictions[,-c(1:h_adjust)][, ((7 * (i - 1)) + 1):(7 *
-                                                                          i)]))
+      rowSums(daily_predictions[, ((7 * (i - 1)) + 1):(7 * i)])
+    )
   
   # extract predictive quantiles, intervals, and medians
   quantiles_df <- get_quantiles_df(predictions, taus)
@@ -132,54 +148,56 @@ fit_baseline_one_location <- function(reference_date,
   last_target_date <- forecast_date + 28L
   effective_horizon <- as.integer(last_target_date - last_data_date)
   h_adjustments <- as.integer(effective_horizon - 28L)
+
   # set baseline variations to fit
   variations_to_fit <- tidyr::expand_grid(
     transformation = transformation,
     symmetrize = symmetrize,
     window_size = window_size
   )
-  # tryCatch outlier detection and correction
-  tryCatch({
-    location_data = location_data %>%
-      suppressMessages(
-        detect_outliers(
-          var = value,
-          methods = detection_methods,
-          combine_method = "median",
-          new_col_name = "outlier_info"
-        )
-      ) %>%
-      suppressMessages(
-        correct_outliers(
-          var = value,
-          outliers_col = "outlier_info",
-          detection_method = "combined",
-          new_col_name = "corrected_value1"
-        )
-      ) %>%
-      suppressMessages(
-        detect_outliers(
-          var = corrected_value1,
-          methods = detection_methods,
-          combine_method = "median",
-          new_col_name = "outlier_info"
-        )
-      ) %>%
-      suppressMessages(
-        correct_outliers(
-          var = corrected_value1,
-          outliers_col = "outlier_info",
-          detection_method = "combined",
-          new_col_name = "corrected_value2"
-        )
-      )
-  },
-  error = function(e) {
-    next
-  },
-  message = function(m) {
-    next
-  })
+
+  # # tryCatch outlier detection and correction
+  # tryCatch({
+  #   location_data = location_data %>%
+  #     suppressMessages(
+  #       detect_outliers(
+  #         var = value,
+  #         methods = detection_methods,
+  #         combine_method = "median",
+  #         new_col_name = "outlier_info"
+  #       )
+  #     ) %>%
+  #     suppressMessages(
+  #       correct_outliers(
+  #         var = value,
+  #         outliers_col = "outlier_info",
+  #         detection_method = "combined",
+  #         new_col_name = "corrected_value1"
+  #       )
+  #     ) %>%
+  #     suppressMessages(
+  #       detect_outliers(
+  #         var = corrected_value1,
+  #         methods = detection_methods,
+  #         combine_method = "median",
+  #         new_col_name = "outlier_info"
+  #       )
+  #     ) %>%
+  #     suppressMessages(
+  #       correct_outliers(
+  #         var = corrected_value1,
+  #         outliers_col = "outlier_info",
+  #         detection_method = "combined",
+  #         new_col_name = "corrected_value2"
+  #       )
+  #     )
+  # },
+  # error = function(e) {
+  #   next
+  # },
+  # message = function(m) {
+  #   next
+  # })
   # get predictions
   if ("corrected_value2" %in% colnames(location_data)) {
     var <- "corrected_value2"
