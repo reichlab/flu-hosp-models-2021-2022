@@ -83,7 +83,7 @@ plots_folders <- file.path(
   paste0("UMass-", model_names)
 )
 
-for (folder in c(results_folders, plots_folders)) {
+for (folder in c(model_folders, plots_folders)) {
   if (!file.exists(folder)) dir.create(folder, recursive = TRUE)
 }
 
@@ -95,7 +95,7 @@ results_paths <- file.path(
     model_names,
     ".csv"))
 
-plots_paths <- file.path(
+plot_paths <- file.path(
   plots_folders,
   paste0(
     forecast_date,
@@ -179,7 +179,7 @@ for (i in 1:(model_number + 1)) {
   p <-
     covidHubUtils::plot_forecasts(
       forecast_data = all_baselines %>%
-        dplyr::filter(model == paste0('UMassCoE-',model_names[i])),
+        dplyr::filter(model == paste0('UMass-',model_names[i])),
       facet = "~location",
       hub = "FluSight",
       truth_data = truth_for_plotting,
