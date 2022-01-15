@@ -1,5 +1,6 @@
 #' Obtain influenza signal at daily or weekly scale
 #'
+#' @param pathogen the pathogen we want data for, either flu or covid
 #' @param as_of Date or string in format "YYYY-MM-DD" specifying the date which
 #'   the data was available on or before. If `NULL`, the default returns the
 #'   most recent available data.
@@ -12,23 +13,24 @@
 #'   aggregating state-level values and calculating weekly totals. Defaults to
 #'   `FALSE`
 #'
-#' @return data frame of flu incidence with columns date, location,
+#' @return data frame of incidence with columns date, location,
 #'   location_name, value
-load_flu_hosp_data <- function(as_of = NULL,
-                               locations = "*",
-                               temporal_resolution = "daily",
-                               source = "HealthData",
-                               na.rm = FALSE) {
+load_hosp_data <- function(pathogen = c("flu", "covid"),
+                           as_of = NULL,
+                           locations = "*",
+                           temporal_resolution = "daily",
+                           source = "HealthData",
+                           na.rm = FALSE) {
   library(dplyr)
   library(readr)
   library(tidyverse)
-  
+
   # load location data
   location_data <- readr::read_csv(file = "data/locations.csv",
                                    show_col_types = FALSE) %>%
     dplyr::mutate(geo_value = tolower(abbreviation)) %>%
     dplyr::select(-c("population", "abbreviation"))
-  
+
   # validate function arguments
   if (!(source %in% c("covidcast", "HealthData"))) {
     stop("`source` must be either covidcast or HealthData")
@@ -36,9 +38,9 @@ load_flu_hosp_data <- function(as_of = NULL,
     if (as_of != Sys.Date()) {
       stop("`as_of` must be either `NULL` or the current date if source is HealthData")
     }
-    
+
   }
-  
+
   valid_locations <- unique(c(
     "*",
     location_data$geo_value,
@@ -49,10 +51,13 @@ load_flu_hosp_data <- function(as_of = NULL,
   temporal_resolution <- match.arg(temporal_resolution,
                                    c("daily", "weekly"),
                                    several.ok = FALSE)
+
+  pathogen <- match.arg(pathogen)
+
   if (!is.logical(na.rm)) {
     stop("`na.rm` must be a logical value")
   }
-  
+
   # get geo_value based on fips if fips are provided
   if (any(grepl("\\d", locations))) {
     locations <-
@@ -66,14 +71,16 @@ load_flu_hosp_data <- function(as_of = NULL,
   } else {
     locations_to_fetch <- locations
   }
-  
+
+  signal <- ifelse(pathogen=="flu", "confirmed_admissions_influenza_1d", "confirmed_admissions_covid_1d")
+
   # pull daily state data
   if (source == "covidcast") {
     state_dat <- covidcast::covidcast_signal(
       as_of = as_of,
       geo_values = locations_to_fetch,
       data_source = "hhs",
-      signal = "confirmed_admissions_influenza_1d",
+      signal = signal,
       geo_type = "state"
     ) %>%
       dplyr::mutate(
@@ -91,7 +98,9 @@ load_flu_hosp_data <- function(as_of = NULL,
       jsonlite::fromJSON()
     csv_path <- tail(temp$archive_link$url, 1)
     data <- readr::read_csv(csv_path)
-    state_dat <- data %>%
+    ## value depends on which pathogen
+    if(pathogen == "flu") {
+      state_dat <- data %>%
       dplyr::transmute(
         geo_value = tolower(state),
         date = date - 1,
@@ -100,9 +109,21 @@ load_flu_hosp_data <- function(as_of = NULL,
         value = previous_day_admission_influenza_confirmed
       ) %>%
       dplyr::arrange(geo_value, date)
+    } else {
+      state_dat <- data %>%
+        dplyr::transmute(
+          geo_value = tolower(state),
+          date = date - 1,
+          epiyear = lubridate::epiyear(date),
+          epiweek = lubridate::epiweek(date),
+          value = previous_day_admission_influenza_confirmed,
+          value = previous_day_admission_adult_covid_confirmed + previous_day_admission_pediatric_covid_confirmed
+        ) %>%
+        dplyr::arrange(geo_value, date)
+    }
   }
-  
-  
+
+
   # creating US and bind to state-level data if US is specified or locations
   if (locations_to_fetch == "*") {
     us_dat <- state_dat %>%
@@ -121,7 +142,7 @@ load_flu_hosp_data <- function(as_of = NULL,
   } else {
     dat <- state_dat
   }
-  
+
   # weekly aggregation
   if (temporal_resolution != "daily") {
     dat <- dat %>%
@@ -142,6 +163,37 @@ load_flu_hosp_data <- function(as_of = NULL,
     # drop data for locations retrieved from covidcast,
     # but not included in forecasting exercise -- mainly American Samoa
     dplyr::filter(!is.na(location))
-  
+
   return(final_data)
+}
+
+
+#' Retrieving flu data
+#'
+#' @param as_of Date or string in format "YYYY-MM-DD" specifying the date which
+#'   the data was available on or before. If `NULL`, the default returns the
+#'   most recent available data.
+#' @param locations optional list of FIPS or location abbreviations. Defaults to
+#'   the US, the 50 states, DC, PR, and VI.
+#' @param temporal_resolution "daily" or "weekly"
+#' @param source either "covidcast" or "HealthData". HealthData only supports
+#' `as_of` being `NULL` or the current date.
+#' @param na.rm boolean indicating whether NA values should be dropped when
+#'   aggregating state-level values and calculating weekly totals. Defaults to
+#'   `FALSE`
+#'
+#' @return data frame of flu incidence with columns date, location,
+#'   location_name, value
+load_flu_hosp_data <- function(as_of = NULL,
+                               locations = "*",
+                               temporal_resolution = "daily",
+                               source = "HealthData",
+                               na.rm = FALSE) {
+  load_hosp_data(pathogen = "flu",
+                 as_of = as_of,
+                 temporal_resolution = temporal_resolution,
+                 source = source,
+                 na.rm = na.rm)
+
+
 }
