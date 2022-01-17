@@ -72,10 +72,14 @@ load_hosp_data <- function(pathogen = c("flu", "covid"),
     locations_to_fetch <- locations
   }
 
-  signal <- ifelse(pathogen=="flu", "confirmed_admissions_influenza_1d", "confirmed_admissions_covid_1d")
 
   # pull daily state data
   if (source == "covidcast") {
+
+    ## this chunk retrieves data from covidcast
+
+    signal <- ifelse(pathogen=="flu", "confirmed_admissions_influenza_1d", "confirmed_admissions_covid_1d")
+
     state_dat <- covidcast::covidcast_signal(
       as_of = as_of,
       geo_values = locations_to_fetch,
@@ -89,7 +93,11 @@ load_hosp_data <- function(pathogen = c("flu", "covid"),
       ) %>%
       dplyr::select(geo_value, epiyear, epiweek, time_value, value) %>%
       dplyr::rename(date = time_value)
+
   } else {
+
+    ## this chunk retrieves data from HeatlhData
+
     temp <- httr::GET(
       "https://healthdata.gov/resource/qqte-vkut.json",
       config = httr::config(ssl_verifypeer = FALSE)
@@ -98,7 +106,8 @@ load_hosp_data <- function(pathogen = c("flu", "covid"),
       jsonlite::fromJSON()
     csv_path <- tail(temp$archive_link$url, 1)
     data <- readr::read_csv(csv_path)
-    ## value depends on which pathogen
+
+    ## value returned depends on which pathogen was specified
     if(pathogen == "flu") {
       state_dat <- data %>%
       dplyr::transmute(
@@ -116,7 +125,6 @@ load_hosp_data <- function(pathogen = c("flu", "covid"),
           date = date - 1,
           epiyear = lubridate::epiyear(date),
           epiweek = lubridate::epiweek(date),
-          value = previous_day_admission_influenza_confirmed,
           value = previous_day_admission_adult_covid_confirmed + previous_day_admission_pediatric_covid_confirmed
         ) %>%
         dplyr::arrange(geo_value, date)
@@ -191,6 +199,7 @@ load_flu_hosp_data <- function(as_of = NULL,
                                na.rm = FALSE) {
   load_hosp_data(pathogen = "flu",
                  as_of = as_of,
+                 locations = locations,
                  temporal_resolution = temporal_resolution,
                  source = source,
                  na.rm = na.rm)
