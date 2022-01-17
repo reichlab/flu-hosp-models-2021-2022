@@ -8,10 +8,14 @@ library(simplets)
 library(covidHubUtils)
 library(hubEnsembles)
 library(ggforce)
+library(furrr)
 # library(here)
 # setwd(here())
 source("./R/load_flu_hosp_data.R")
 source("./R/fit_baseline_one_location.R")
+
+ncores <- future::availableCores()
+future::plan(multisession, workers = ncores - 1)
 
 # Set locations and quantiles
 required_quantiles <-
@@ -26,51 +30,83 @@ required_locations <-
 reference_date <-
   as.character(lubridate::floor_date(Sys.Date(), unit = "week") - 1)
 forecast_date <- as.character(as.Date(reference_date) + 2)
-temporal_resolution <- "weekly"
+
 # Load data
-data <- load_flu_hosp_data(
+daily_data <- load_flu_hosp_data(
     as_of = NULL,
-    temporal_resolution = temporal_resolution ) %>%
+    temporal_resolution = "daily") %>%
+  dplyr::left_join(required_locations, by = "location") %>%
+  dplyr::mutate(geo_value = tolower(abbreviation)) %>%
+  dplyr::select(geo_value, time_value = date, value)
+
+weekly_data <- load_flu_hosp_data(
+    as_of = NULL,
+    temporal_resolution = "weekly") %>%
   dplyr::left_join(required_locations, by = "location") %>%
   dplyr::mutate(geo_value = tolower(abbreviation)) %>%
   dplyr::select(geo_value, time_value = date, value)
 
 location_number <- length(required_locations$abbreviation)
 
-# set variation of baseline to fit
-transformation_variation <- c("none", "sqrt")
-symmetrize_variation <- c(TRUE, FALSE)
-window_size_variation <- 5
+# set up variations of baseline to fit
+model_variations <- dplyr::bind_rows(
+  tidyr::expand_grid(
+    transformation = c("none", "sqrt"),
+    symmetrize = c(TRUE, FALSE),
+    window_size = c(4, 3),
+    temporal_resolution = "weekly"
+  ),
+  tidyr::expand_grid(
+    transformation = c("none", "sqrt"),
+    symmetrize = c(FALSE),
+    # symmetrize = c(TRUE, FALSE),
+    window_size = c(21, 14),
+    temporal_resolution = "daily"
+  )
+)
+
 # fit baseline models
 reference_date <- lubridate::ymd(reference_date)
 quantile_forecasts <-
-  purrr::map_dfr(required_locations$abbreviation,
-                 function(location) {
-                   data <- data %>%
-                     dplyr::filter(geo_value == tolower(location))
-                   location_results <-
-                     fit_baseline_one_location(
-                       reference_date,
-                       data,
-                       transformation_variation,
-                       symmetrize_variation,
-                       window_size_variation,
-                       temporal_resolution,
-                       required_quantiles
-                     )
-                 }) %>%
-  dplyr::left_join(required_locations, by = "abbreviation") %>%
-  dplyr::select(forecast_date,
-                target,
-                target_end_date,
-                location,
-                type,
-                quantile,
-                value,
-                model) %>%
-  dplyr::mutate(model = paste0(model, "_", temporal_resolution))
+  furrr::future_pmap_dfr(
+    model_variations,
+    function(transformation,
+             symmetrize,
+             window_size,
+             temporal_resolution) {
+      purrr::map_dfr(
+        required_locations$abbreviation,
+        function(location) {
+          if (temporal_resolution == "daily") {
+            loc_data <- daily_data %>%
+              dplyr::filter(geo_value == tolower(location))
+          } else {
+            loc_data <- weekly_data %>%
+              dplyr::filter(geo_value == tolower(location))
+          }
+          location_results <- fit_baseline_one_location(
+            reference_date = reference_date,
+            location_data = loc_data,
+            transformation = transformation,
+            symmetrize = symmetrize,
+            window_size = window_size,
+            temporal_resolution = temporal_resolution,
+            taus = required_quantiles
+          )
+        }) %>%
+      dplyr::left_join(required_locations, by = "abbreviation") %>%
+      dplyr::select(
+        forecast_date,
+        target,
+        target_end_date,
+        location,
+        type,
+        quantile,
+        value,
+        model)
+    })
 
-model_number <- length(unique(quantile_forecasts$model))
+model_number <- nrow(model_variations)
 model_names <-
   c(unique(quantile_forecasts$model), "trends_ensemble")
 model_folders <- file.path(
@@ -132,7 +168,11 @@ baseline_ensemble <- hubEnsembles::build_quantile_ensemble(
   all_baselines,
   forecast_date = forecast_date,
   model_name = "baseline_ensemble"
-)
+) %>%
+  dplyr::mutate(
+    value = ifelse(
+      is.na(quantile) | quantile >= 0.5, ceiling(value), floor(value)
+    ))
 
 # save ensemble in hub format
 write.csv(
@@ -162,9 +202,10 @@ all_baselines <- dplyr::bind_rows(
     hub = "FluSight",
     verbose = TRUE
   )
-  )
+)
 
-truth_for_plotting <- data %>% dplyr::mutate(abbreviation = toupper(geo_value)) %>%
+truth_for_plotting <- weekly_data %>%
+  dplyr::mutate(abbreviation = toupper(geo_value)) %>%
   dplyr::left_join(hub_locations_flusight, by = "abbreviation") %>%
   dplyr::transmute(
     model = "Observed Data (HealthData)",
@@ -173,61 +214,64 @@ truth_for_plotting <- data %>% dplyr::mutate(abbreviation = toupper(geo_value)) 
     target_variable = "inc flu hosp",
     value = value)
 
-for (i in 1:(model_number + 1)) {
-  # plot
-  plot_path <- plot_paths[i]
-  p <-
-    covidHubUtils::plot_forecasts(
-      forecast_data = all_baselines %>%
-        dplyr::filter(model == paste0('UMass-',model_names[i])),
-      facet = "~location",
-      hub = "FluSight",
-      truth_data = truth_for_plotting,
-      truth_source = "HealthData",
-      subtitle = "none",
-      title = "none",
-      show_caption = FALSE,
-      plot = FALSE
-    ) +
-    scale_x_date(
-      breaks = "1 month",
-      date_labels = "%b-%y",
-      limits = as.Date(c(
-        reference_date - (7 * 32), reference_date + 28
-      ), format = "%b-%y")
-    ) +
-    theme_update(
-      legend.position = "bottom",
-      legend.direction = "vertical",
-      legend.text = element_text(size = 8),
-      legend.title = element_text(size = 8),
-      axis.text.x = element_text(angle = 90),
-      axis.title.x = element_blank()
-    ) +
-    ggforce::facet_wrap_paginate(
-      ~ location,
-      scales = "free",
-      ncol = 2,
-      nrow = 3,
-      page = 1
-    )
-  n <- n_pages(p)
-  pdf(
-    plot_path,
-    paper = 'A4',
-    width = 205 / 25,
-    height = 270 / 25
-  )
-  for (i in 1:n) {
-    suppressWarnings(print(
-      p + ggforce::facet_wrap_paginate(
+plot_results <- furrr::future_map_lgl(
+  seq_len(model_number + 1),
+  function(i) {
+    # plot
+    plot_path <- plot_paths[i]
+    p <-
+      covidHubUtils::plot_forecasts(
+        forecast_data = all_baselines %>%
+          dplyr::filter(model == paste0('UMass-',model_names[i])),
+        facet = "~location",
+        hub = "FluSight",
+        truth_data = truth_for_plotting,
+        truth_source = "HealthData",
+        subtitle = "none",
+        title = "none",
+        show_caption = FALSE,
+        plot = FALSE
+      ) +
+      scale_x_date(
+        breaks = "1 month",
+        date_labels = "%b-%y",
+        limits = as.Date(c(
+          reference_date - (7 * 32), reference_date + 28
+        ), format = "%b-%y")
+      ) +
+      theme_update(
+        legend.position = "bottom",
+        legend.direction = "vertical",
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 8),
+        axis.text.x = element_text(angle = 90),
+        axis.title.x = element_blank()
+      ) +
+      ggforce::facet_wrap_paginate(
         ~ location,
         scales = "free",
         ncol = 2,
         nrow = 3,
-        page = i
+        page = 1
       )
-    ))
-  }
-  dev.off()
-}
+    n <- n_pages(p)
+    pdf(
+      plot_path,
+      paper = 'A4',
+      width = 205 / 25,
+      height = 270 / 25
+    )
+    for (page_num in 1:n) {
+      suppressWarnings(print(
+        p + ggforce::facet_wrap_paginate(
+          ~ location,
+          scales = "free",
+          ncol = 2,
+          nrow = 3,
+          page = page_num
+        )
+      ))
+    }
+    dev.off()
+    return(TRUE)
+  })

@@ -54,26 +54,34 @@ get_baseline_predictions <- function(location_data,
   )
 
   # predict
-  predictions <-
-    predict(baseline_fit, nsim = 100000, horizon = horizons)
+  predictions <- predict(
+    baseline_fit,
+    nsim = 100000,
+    horizon = horizons,
+    origin = ifelse(
+      temporal_resolution == "daily",
+      "loess",
+      "obs"
+    )
+  )
 
   temporal_resolution <- match.arg(temporal_resolution, c("daily", "weekly"))
   if (temporal_resolution == "daily") {
-  if (h_adjust < 0) {
-    # augment with observed leading data
-    predictions <- cbind(
-      matrix(
-        tail(location_data[[response_var]], abs(h_adjust)),
-        nrow = 100000,
-        ncol = abs(h_adjust),
-        byrow = TRUE),
-      predictions
-    )
-    h_adjust <- 0L
-  } else if (h_adjust > 0) {
-    # drop extra forecasts at the beginning
-    predictions <- predictions[, -seq_len(h_adjust)]
-  }
+    if (h_adjust < 0) {
+      # augment with observed leading data
+      predictions <- cbind(
+        matrix(
+          tail(location_data[[response_var]], abs(h_adjust)),
+          nrow = 100000,
+          ncol = abs(h_adjust),
+          byrow = TRUE),
+        predictions
+      )
+      h_adjust <- 0L
+    } else if (h_adjust > 0) {
+      # drop extra forecasts at the beginning
+      predictions <- predictions[, -seq_len(h_adjust)]
+    }
   }
 
   # truncate to non-negative
@@ -233,9 +241,7 @@ fit_baseline_one_location <- function(reference_date,
     dplyr::transmute(
       forecast_date = as.character(forecast_date),
       target = paste0(h, " wk ahead inc flu hosp"),
-      target_end_date = as.character(reference_date
-                                     +
-                                       7L * h),
+      target_end_date = as.character(reference_date + 7L * h),
       abbreviation = toupper(unique(location_data$geo_value)),
       type = 'quantile',
       quantile = quantile,
@@ -245,6 +251,7 @@ fit_baseline_one_location <- function(reference_date,
         transformation,
         ifelse(symmetrize, "sym", "nonsym"),
         window_size,
+        temporal_resolution,
         sep = "_"
       )
     )
