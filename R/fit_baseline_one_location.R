@@ -25,7 +25,9 @@ get_quantiles_df <- function(predictions, taus) {
 #' @param  transformation can be either "none" or "sqrt" or  both.
 #' @param  symmetrize can be either `TRUE` or `FALSE` or both.
 #' @param  window_size a value or a vector of values of window size.
-#' @param  daily_horizons daily horizons
+#' @param  horizons horizons to predict at
+#' @param  temporal_resolution 'daily' or 'weekly'; specifies timescale of
+#' location_data and horizons
 #' @param  h_adjust daily horizon adjustment for aggregation
 #'
 #' @return data frame of a baseline forecast for one location
@@ -34,7 +36,8 @@ get_baseline_predictions <- function(location_data,
                                      transformation,
                                      symmetrize,
                                      window_size,
-                                     daily_horizons,
+                                     horizons,
+                                     temporal_resolution,
                                      h_adjust,
                                      taus) {
   # fit
@@ -49,40 +52,45 @@ get_baseline_predictions <- function(location_data,
     symmetrize = symmetrize,
     window_size = window_size
   )
-  
+
   # predict
-  daily_predictions <-
-    predict(baseline_fit, nsim = 100000, horizon = daily_horizons)
-  
+  predictions <-
+    predict(baseline_fit, nsim = 100000, horizon = horizons)
+
+  temporal_resolution <- match.arg(temporal_resolution, c("daily", "weekly"))
+  if (temporal_resolution == "daily") {
   if (h_adjust < 0) {
     # augment with observed leading data
-    daily_predictions <- cbind(
+    predictions <- cbind(
       matrix(
         tail(location_data[[response_var]], abs(h_adjust)),
         nrow = 100000,
         ncol = abs(h_adjust),
         byrow = TRUE),
-      daily_predictions
+      predictions
     )
     h_adjust <- 0L
   } else if (h_adjust > 0) {
     # drop extra forecasts at the beginning
-    daily_predictions <- daily_predictions[, -seq_len(h_adjust)]
+    predictions <- predictions[, -seq_len(h_adjust)]
   }
-  
+  }
+
   # truncate to non-negative
-  daily_predictions <- pmax(daily_predictions, 0)
-  
-  # aggregate to weekly
+  # AG: wondering what the correct order of operations is here
+  predictions <- pmax(predictions, 0)
+
+  # aggregate to weekly if temporal_resolution is daily
   ## truncate to start at the first date of the first target week
-  predictions <-
+  if (temporal_resolution == "daily") {
+    predictions <-
     sapply(1:4, function(i)
-      rowSums(daily_predictions[, ((7 * (i - 1)) + 1):(7 * i)])
+      rowSums(predictions[, ((7 * (i - 1)) + 1):(7 * i)])
     )
-  
+  }
   # extract predictive quantiles, intervals, and medians
   quantiles_df <- get_quantiles_df(predictions, taus)
-  
+
   return(tibble(quantiles_df = list(quantiles_df)))
 }
 
@@ -94,6 +102,8 @@ get_baseline_predictions <- function(location_data,
 #' @param  transformation can be either "none" or "sqrt" or  both.
 #' @param  symmetrize can be either `TRUE` or `FALSE` or both.
 #' @param  window_size a value or a vector of values of window size.
+#' @param  temporal_resolution 'daily' or 'weekly'; specifies timescale of
+#' location_data and horizons
 #' @param  taus probability levels
 #'
 #' @return data frame of a baseline forecast for one location
@@ -102,6 +112,7 @@ fit_baseline_one_location <- function(reference_date,
                                       transformation,
                                       symmetrize,
                                       window_size,
+                                      temporal_resolution,
                                       taus) {
   library(epitools)
   library(dplyr)
@@ -204,12 +215,14 @@ fit_baseline_one_location <- function(reference_date,
   } else{
     var <- "value"
   }
+  temporal_resolution <- match.arg(temporal_resolution, c("daily", "weekly"))
   predictions <- purrr::pmap_dfr(
     variations_to_fit,
     get_baseline_predictions,
     location_data = location_data,
     response_var = var,
-    daily_horizons = effective_horizon,
+    horizons = ifelse(temporal_resolution == "daily", effective_horizon, 4),
+    temporal_resolution = temporal_resolution,
     h_adjust = h_adjustments,
     taus = taus
   )
