@@ -60,9 +60,10 @@ get_baseline_predictions <- function(location_data,
     horizon = horizons,
     origin = ifelse(
       temporal_resolution == "daily",
-      "loess",
+      "median",
       "obs"
-    )
+    ),
+    force_nonneg = TRUE
   )
 
   temporal_resolution <- match.arg(temporal_resolution, c("daily", "weekly"))

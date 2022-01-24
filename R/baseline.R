@@ -58,9 +58,11 @@ model_variations <- dplyr::bind_rows(
   ),
   tidyr::expand_grid(
     transformation = c("none", "sqrt"),
-    symmetrize = c(FALSE),
-    # symmetrize = c(TRUE, FALSE),
-    window_size = c(21, 14),
+    # transformation = "sqrt",
+    # symmetrize = c(FALSE),
+    symmetrize = c(TRUE, FALSE),
+    window_size = c(21 - 1, 14 - 1),
+    # window_size = 7,
     temporal_resolution = "daily"
   )
 )
