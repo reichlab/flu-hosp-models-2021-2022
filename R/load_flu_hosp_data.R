@@ -103,7 +103,8 @@ load_hosp_data <- function(pathogen = c("flu", "covid"),
       config = httr::config(ssl_verifypeer = FALSE)
     ) %>%
       as.character() %>%
-      jsonlite::fromJSON()
+      jsonlite::fromJSON() %>%
+      dplyr::arrange(update_date)
     csv_path <- tail(temp$archive_link$url, 1)
     data <- readr::read_csv(csv_path)
 
@@ -306,15 +307,3 @@ load_flu_hosp_data <- function(as_of = NULL,
   
   return(final_data)
 }
-
-# # import libraries
-# library(dplyr)
-# library(readr)
-# library(covidcast)
-# library(lubridate)
-# library(httr)
-# library(jsonlite)
-# # generate the latest weekly truth data file
-# truth <- load_flu_hosp_data(temporal_resolution = 'weekly', na.rm = TRUE)
-# # write truth data file
-# readr::write_csv(truth, file = "./data-truth/truth-Incident Hospitalizations.csv")
