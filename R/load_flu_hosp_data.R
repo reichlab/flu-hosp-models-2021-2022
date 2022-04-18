@@ -183,7 +183,7 @@ load_flu_hosp_data <- function(as_of = NULL,
                                na.rm = FALSE) {
   
   # load location data
-  location_data <- readr::read_csv(file = "data-locations/locations.csv",
+  location_data <- readr::read_csv(file = "data/locations.csv",
                                    show_col_types = FALSE) %>%
     dplyr::mutate(geo_value = tolower(abbreviation)) %>%
     dplyr::select(-c("population", "abbreviation"))
@@ -307,14 +307,14 @@ load_flu_hosp_data <- function(as_of = NULL,
   return(final_data)
 }
 
-# import libraries
-library(dplyr)
-library(readr)
-library(covidcast)
-library(lubridate)
-library(httr)
-library(jsonlite)
-# generate the latest weekly truth data file
-truth <- load_flu_hosp_data(temporal_resolution = 'weekly', na.rm = TRUE)
-# write truth data file
-readr::write_csv(truth, file = "./data-truth/truth-Incident Hospitalizations.csv")
+# # import libraries
+# library(dplyr)
+# library(readr)
+# library(covidcast)
+# library(lubridate)
+# library(httr)
+# library(jsonlite)
+# # generate the latest weekly truth data file
+# truth <- load_flu_hosp_data(temporal_resolution = 'weekly', na.rm = TRUE)
+# # write truth data file
+# readr::write_csv(truth, file = "./data-truth/truth-Incident Hospitalizations.csv")
