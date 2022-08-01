@@ -14,7 +14,7 @@ fcasts <- load_forecasts(
   hub = "FluSight")
 
 fcasts %>%
-  dplyr::distinct(model, forecast_date)
+  dplyr::count(model, forecast_date)
 
 truth <- load_truth(hub = "FluSight")
 
@@ -33,11 +33,11 @@ p <- scores %>%
     geom_line(mapping = aes(x = forecast_date, y = wis, color = model, size = factor(is_umass_or_ensemble))) +
     scale_size_manual(values = c(0.5, 3.0)) +
     theme_bw()
-p
+#p
 library(plotly)
 ggplotly(p)
 
-scores %>%
+p <- scores %>%
   dplyr::group_by(model, forecast_date) %>%
   dplyr::summarize(
     mae = mean(abs_error),
@@ -47,9 +47,10 @@ scores %>%
     geom_line(mapping = aes(x = forecast_date, y = mae, color = model, size = factor(is_umass_or_ensemble))) +
     scale_size_manual(values = c(0.5, 3.0)) +
     theme_bw()
+ggplotly(p)
 
 
-scores %>%
+p <- scores %>%
   dplyr::group_by(model, forecast_date) %>%
   dplyr::summarize(
     coverage_95 = mean(coverage_95),
@@ -60,9 +61,9 @@ scores %>%
     geom_hline(yintercept = 0.95) +
     scale_size_manual(values = c(0.5, 3.0)) +
     theme_bw()
+ggplotly(p)
 
-
-scores %>%
+p <- scores %>%
   dplyr::group_by(model, forecast_date) %>%
   dplyr::summarize(
     coverage_50 = mean(coverage_50),
@@ -73,7 +74,7 @@ scores %>%
     geom_hline(yintercept = 0.50) +
     scale_size_manual(values = c(0.5, 3.0)) +
     theme_bw()
-
+ggplotly(p)
 
 
 scores %>%
