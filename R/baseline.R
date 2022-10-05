@@ -1,3 +1,8 @@
+# library(devtools)
+# install.packages("feasts")
+# install_github("reichlab/simplets")
+# install_github("reichlab/hubEnsembles")
+
 # adapted from weekly-submission/fit_baseline_model.R
 library(covidcast)
 library(epitools)
