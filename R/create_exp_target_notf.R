@@ -12,9 +12,7 @@
 #' 
 #' @return exp_forecast:data frame in the format specified by CDC containing new cols with the change categories and their probabilities
 
-###########################################################
-# NEED TO UPDATE CODE FROM CREATE_EXP_TARGET_NOTF.R
-###########################################################
+
 
 library(tidyverse)
 library(readr)
@@ -47,8 +45,6 @@ library(ggplot2)
 # https://github.com/thomasp85/ggforce
 library (ggforce)
 
-create_exp_target <- function(hub, models, targets, source, hub_repo_path,data_processed_subpath,c_target) {
-  
 #Important dates used
 last_eval_sat <- as.Date(calc_target_week_end_date(Sys.Date(), horizon = 0))
 last_monday=last_eval_sat-5
@@ -65,7 +61,7 @@ location_data <- readr::read_csv(file = "~/GitHub/Flusight-forecast-data/data-lo
 # load truth and merge with location data
 #    filter most recent truth
 #    set rate, diff, criteria
-weekly_data_all <- load_truth(hub = "FluSight") %>% 
+weekly_data_all <- load_truth(hub = "FluSight",temporal_resolution = "weekly") %>% 
   filter(target_end_date >= prior_10wk_eval_sat) %>%
   dplyr::inner_join(location_data,
                     by = c("location_name"))  %>%
@@ -101,7 +97,7 @@ weekly_data_all <- load_truth(hub = "FluSight") %>%
 weekly_data_recent <-  weekly_data_all %>% 
   filter(target_end_date == last_eval_sat) %>%
   mutate(date = target_end_date + 2)  %>%
-  dplyr::select(location, date, data_value = value, population, count_rate1per100k, count_rate2per100k, crit1, crit2, crit3, crit4)
+  dplyr::select(location, location_name, date, data_value = value, population, count_rate1per100k, count_rate2per100k, crit1, crit2, crit3, crit4)
 
 # # load location data (USE THIS WHEN CDC ADDS DATA)
 # location_data1 <- readr::read_csv(file = "~/GitHub/Flusight-forecast-data/data-locations/locations1.csv") %>%
@@ -111,15 +107,15 @@ weekly_data_recent <-  weekly_data_all %>%
 # load submission file (2 week ahead)
 component_forecast <- 
   load_forecasts(
-    models = models,
+    models = "UMass-trends_ensemble",
     dates = this_monday,
     locations = NULL,
     types = c("quantile","point"),
     targets = paste(1:4, "wk ahead inc flu hosp"),
-    source = source,
-    hub = hub,
-    hub_repo_path=hub_repo_path,
-    data_processed_subpath=data_processed_subpath)
+    source = "local_hub_repo",
+    hub = "FluSight",
+    hub_repo_path="~/GitHub/Flusight-forecast-data",
+    data_processed_subpath="./data-forecasts/")
 
 #filter (2 week ahead horizon)
 component_forecast_2wk <-   component_forecast %>% 
@@ -133,8 +129,8 @@ train_forecasts <- component_forecast_2wk %>%
     value = rnorm(n = nrow(component_forecast_2wk), mean = value, sd = 0.1)
   ) %>%
   dplyr::inner_join(weekly_data_recent,
-                    by = c("forecast_date" = "date", "location")) %>%
-  dplyr::group_by(model, forecast_date, location, horizon, 
+                    by = c("forecast_date" = "date", "location_name")) %>%
+  dplyr::group_by(model, forecast_date, location_name, horizon, 
                   temporal_resolution, target_variable, target_end_date) %>%
   dplyr::summarize(
     cdf_crit1 = distfromq::make_p_fn(
@@ -155,7 +151,7 @@ train_forecasts <- component_forecast_2wk %>%
 exp_forecast <- train_forecasts  %>%
   ungroup()  %>%
   dplyr::inner_join(weekly_data_recent,
-                    by = c("forecast_date" = "date", "location"))  %>%
+                    by = c("forecast_date" = "date", "location_name"))  %>%
   mutate(large_increase=1-cdf_crit1,
          increase=cdf_crit1-cdf_crit2,
          stable=case_when(crit3>0  ~ cdf_crit2-cdf_crit3,
@@ -163,84 +159,25 @@ exp_forecast <- train_forecasts  %>%
          decrease=case_when(crit3>0 & crit4 > 0 ~ cdf_crit3-cdf_crit4,
                             crit3>0 & crit4 < 0 ~ cdf_crit3),
          large_decrease=case_when(crit4>0 ~ cdf_crit4)) %>%
-  select(forecast_date,location,large_increase,increase,stable,decrease,large_decrease)
+  select(forecast_date,location,location_name,large_increase,increase,stable,decrease,large_decrease)
 
 #transpose data_frame to format for submission
-exp_t = melt(exp_forecast,id.vars = c("forecast_date","location"),measure.vars = c("large_increase","increase","stable","decrease","large_decrease") , 
+exp_t = melt(exp_forecast,id.vars = c("forecast_date","location","location_name"),measure.vars = c("large_increase","increase","stable","decrease","large_decrease") , 
              variable.name="type_id", value.name="value",na.rm = TRUE) 
 exp_t <-exp_t %>%
   mutate(target="2 wk flu hosp rate change",
          type="category")  %>%
   # filter(location == "25")  %>%
-  select(forecast_date, target, location, type, type_id, value)
+  select(forecast_date, target, location, location_name, type, type_id, value)
 # return(exp_t)
 
 
 #########################
 # output submission data
 #########################
-submission <-paste0("~/GitHub/Flusight-forecast-data/data-experimental/",this_monday,"-UMass-trends_ensemble.csv")
+submission <-paste0("~/GitHub/Flusight-forecast-data/data-experimental/UMass-trends_ensemble_exp_target/",this_monday,"-UMass-trends_ensemble_exp_target.csv")
 write.csv(exp_t,submission,row.names=FALSE)
 
-# 
-# ############
-# # Plot CDF 
-# ############
-# 
-# # 
-# # plotit <- weekly_data   %>%
-# #   select (location, crit1,crit2,crit3,crit4) %>%
-# #   dplyr::inner_join(component_forecast,
-# #                     by = c("location"))  
-# # q <- ggplot(plotit, aes(x=value, y=quantile)) + geom_point()  +
-# #   facet_wrap_paginate(vars(location), ncol=2, nrow=3, scales="free",page=1)
-# # # q <- ggplot(plotit, aes(x=value, y=quantile)) + geom_point()  +  geom_vline(xintercept=as.numeric(plotit$crit1)) #not working...
-# 
-# #specify path to save PDF to
-# destination = 'C:\\Users\\mzorn\\Documents\\GitHub\\flu-hosp-models-2021-2022\\CDF of original forecasts.pdf'
-# 
-# #open PDF
-# pdf(file=destination)
-# 
-# for (i in 1:9) {
-#   # plot
-#   plot_path <- destination
-#   title<-  paste0("CDF of  UMass-trends_ensemble")
-#   q <-  plot_forecasts(forecast_data = component_forecast,
-#                        facet = "~location",
-#                        facet_scales = "fixed",
-#                        models = "UMass-trends_ensemble",
-#                        locations = NULL,
-#                        hub = "FluSight",
-#                        truth_source="HealthData")
-# 
-#   
-#   
-#   n <- n_pages(q)
-#   pdf(
-#     plot_path,
-#     paper = 'A4',
-#     width = 205 / 25,
-#     height = 270 / 25
-#   )
-#   for (i in 1:9) {
-#     suppressWarnings(print(
-#       q  + ggforce::facet_wrap_paginate(
-#         ~ location,
-#         scales = "free",
-#         ncol = 2,
-#         nrow = 3,
-#         page = i
-#       )
-#     ))
-#   }
-#   
-#   #turn off PDF plotting
-#   dev.off() 
-# }
-# 
-# 
-# 
 ###########################
 # Plot Experimental forecasts
 ############################# #specify path to save PDF to
@@ -280,11 +217,4 @@ for (i in 1:9) {
   #turn off PDF plotting
   dev.off()
 }
-}
-
-#example
-create_exp_target(hub="FluSight", models = "UMass-trends_ensemble",targets = ("2 wk ahead inc flu hosp"), source = "local_hub_repo", hub_repo_path="~/GitHub/Flusight-forecast-data",
-                  data_processed_subpath="./data-forecasts/",c_target="2 wk flu hosp rate change")
-# create_exp_target(hub="FluSight", models = "CU-ensemble",targets = ("2 wk ahead inc flu hosp"), source = "local_hub_repo", hub_repo_path="~/GitHub/Flusight-forecast-data",
-#                   data_processed_subpath="./data-forecasts/")
 
