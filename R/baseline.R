@@ -1,3 +1,8 @@
+# library(devtools)
+# install.packages("feasts")
+# install_github("reichlab/simplets")
+# install_github("reichlab/hubEnsembles")
+
 # adapted from weekly-submission/fit_baseline_model.R
 library(covidcast)
 library(epitools)
@@ -32,19 +37,46 @@ reference_date <-
 forecast_date <- as.character(as.Date(reference_date) + 2)
 
 # Load data
-daily_data <- load_flu_hosp_data(
-    as_of = NULL,
-    temporal_resolution = "daily") %>%
+daily_data <- covidData::load_data(
+  spatial_resolution = c("national", "state"),
+  temporal_resolution = "daily",
+  measure = "flu hospitalizations",
+  drop_last_date = TRUE
+) %>%
+  dplyr::left_join(covidData::fips_codes, by = "location") %>%
+  dplyr::transmute(
+    date,
+    location,
+    location_name = ifelse(location_name == "United States", "US", location_name),
+    value = inc) %>%
+  dplyr::filter(location != "60") %>%
+  dplyr::arrange(location, date) %>%
+  # the previous lines reproduce the output of the current `load_flu_hosp_data` function
+  # the following lines currently follow the call to `load_flu_hosp_data` in baseline.R
   dplyr::left_join(required_locations, by = "location") %>%
   dplyr::mutate(geo_value = tolower(abbreviation)) %>%
   dplyr::select(geo_value, time_value = date, value)
 
-weekly_data <- load_flu_hosp_data(
-    as_of = NULL,
-    temporal_resolution = "weekly") %>%
+weekly_data <- covidData::load_data(
+  spatial_resolution = c("national", "state"),
+  temporal_resolution = "weekly",
+  measure = "flu hospitalizations",
+  drop_last_date = FALSE
+) %>%
+  dplyr::left_join(covidData::fips_codes, by = "location") %>%
+  dplyr::transmute(
+    date,
+    location,
+    location_name = ifelse(location_name == "United States", "US", location_name),
+    value = inc) %>%
+  dplyr::filter(location != "60") %>%
+  dplyr::arrange(location, date)
+  # the previous lines reproduce the output of the current `load_flu_hosp_data` function
+  # the following lines currently follow the call to `load_flu_hosp_data` in baseline.R
   dplyr::left_join(required_locations, by = "location") %>%
   dplyr::mutate(geo_value = tolower(abbreviation)) %>%
   dplyr::select(geo_value, time_value = date, value)
+
 
 location_number <- length(required_locations$abbreviation)
 
