@@ -4,8 +4,8 @@
 #' @param targets: character vector of targets to retrieve, for example c('1 wk ahead cum death', '2 wk ahead cum death'). 
 #' Default to NULL which stands for all valid targets.
 #' @param source: string specifying where forecasts will be loaded from: one of "local_hub_repo", "zoltar" and "local_zoltar". Default to "zoltar".
-#' @param hub_repo_path: path to local clone of the forecast hub repository
-#' @param data_processed_subpath: folder within the hub_repo_path that contains forecast submission files. 
+#' @param hub_repo: path to local clone of the forecast hub repository
+#' @param data_processed: folder within the hub_repo_path that contains forecast submission files. 
 #' Default to "data-processed/", which is appropriate for the covid19-forecast-hub repository.
 #' @param c_target: character vector of targets for experimental submission file, for example c("2 wk flu hosp rate change"). 
 #' 
@@ -60,11 +60,11 @@ library(gridExtra)
 # https://github.com/DavisVaughan/furrr
 library (furrr)
 
-create_exp_target <- function(models, targets, source, hub_repo_path,data_processed_subpath,c_target) {
+create_exp_target <- function(models, targets, source, hub_repo,data_processed,c_target) {
   
 #Important dates used
-# last_eval_sat <- as.Date(calc_target_week_end_date(Sys.Date(), horizon = 0)) 
-last_eval_sat <- as.Date(calc_target_week_end_date(Sys.Date(), horizon = 0))-7 # for debugging if run Tuesday-Sunday
+last_eval_sat <- as.Date(calc_target_week_end_date(Sys.Date(), horizon = 0))
+# last_eval_sat <- as.Date(calc_target_week_end_date(Sys.Date(), horizon = 0))-7 # for debugging if run Tuesday-Sunday
 this_monday=last_eval_sat+2
 prior_eval_sat=last_eval_sat-7
 prior_10wk_eval_sat=last_eval_sat-70
@@ -128,9 +128,9 @@ component_forecast <-
     types = c("quantile","point"),
     targets = paste(1:4, "wk ahead inc flu hosp"),
     source = source,
-    hub = "FluSight" ,
-    hub_repo_path=hub_repo_path,
-    data_processed_subpath=data_processed_subpath)
+    hub = "FluSight",
+    hub_repo_path=hub_repo,
+    data_processed_subpath=data_processed)
 
 #filter (2 week ahead horizon)
 component_forecast_2wk <-   component_forecast %>% 
@@ -183,21 +183,15 @@ exp_t <-exp_t %>%
   mutate(target="2 wk flu hosp rate change",
          type="category")  %>%
   select(forecast_date, target, location, location_name, type, type_id, value)
-return(exp_t)
+# return(exp_t)
 
-
-# #########################
-# # output submission data
-# #########################
-# submission <-paste0("~/GitHub/Flusight-forecast-data/data-experimental/UMass-trends_ensemble_exp_target/",this_monday,"-UMass-trends_ensemble_exp_target_testxxx.csv")
-# write.csv(exp_t,submission,row.names=FALSE)
 
 
 #########################
 # output submission data
 #########################
-submission <-paste0("~/GitHub/Flusight-forecast-data/data-experimental/UMass-trends_ensemble/",this_monday,"-UMass-trends_ensemble.csv")
-submission1 <-paste0("~/GitHub/flu-hosp-models-2021-2022/weekly-submission/forecasts/data-experimental/",this_monday,"-UMass-trends_ensemble.csv")
+submission <-paste0("~/GitHub/Flusight-forecast-data/data-experimental/", models,"/",this_monday,"-",models,".csv")
+submission1 <-paste0("~/GitHub/flu-hosp-models-2021-2022/weekly-submission/forecasts/data-experimental/",this_monday,"-",models,".csv")
 write.csv(exp_t,submission,row.names=FALSE)
 write.csv(exp_t,submission1,row.names=FALSE)
 
@@ -206,8 +200,7 @@ write.csv(exp_t,submission1,row.names=FALSE)
 ####################################################### 
 
 #specify path to save PDF to
-destination = 'C:\\Users\\mzorn\\Documents\\GitHub\\flu-hosp-models-2021-2022\\weekly-submission\\forecasts\\data-experimental\\plots\\2022-12-12-UMass-trends_ensemble.pdf'
-
+destination <-paste0("~/GitHub/flu-hosp-models-2021-2022/weekly-submission/forecasts/data-experimental/plots/",this_monday,"-",models,".pdf")
 #open PDF
 pdf(file=destination,paper='a4r')
 # pdf(file=destination)
@@ -218,11 +211,11 @@ for (i in 1:54) {
                      # location = the_locations[i],
                      location = the_locations[i],
                      target_variable="inc flu hosp",
-                     models=c("UMass-trends_ensemble"),
+                     models=models,
                      # facet = ~model, facet_scales = "fixed", title = "default",
                      show_caption = TRUE,
                      truth_source="HealthData",
-                     title='UMass-trends_ensemble Original forecast',
+                     title='Original forecast',
                      plot=FALSE) +
     theme(legend.position = c(.05,.95), legend.justification = c(0,1), legend.key = element_rect(colour = "transparent", fill = "white"), 
           legend.background = element_rect(alpha("white", 0.5)), legend.box="horizontal")
@@ -240,6 +233,6 @@ dev.off()
 }
 
 #example
-create_exp_target(models = "UMass-trends_ensemble",targets = ("2 wk ahead inc flu hosp"), source = "local_hub_repo", hub_repo_path="~/GitHub/Flusight-forecast-data",
-                  data_processed_subpath="./data-forecasts/",c_target="2 wk flu hosp rate change")
+create_exp_target(models = "UMass-trends_ensemble",targets = ("2 wk ahead inc flu hosp"), source = "local_hub_repo", hub_repo="~/GitHub/flu-hosp-models-2021-2022",
+                  data_processed="./weekly-submission/forecasts/",c_target="2 wk flu hosp rate change")
 
