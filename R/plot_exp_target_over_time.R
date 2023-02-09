@@ -77,7 +77,7 @@ library(lubridate)
                               value<crit3 | value >=crit2~ ' '),
              decrease=case_when(value<crit3 & value >= crit4 ~ '*',
                                 value<crit4 | value >= crit3 ~ ' '),
-             large_decrease=case_when(value<=crit4 ~ '*',
+             large_decrease=case_when(value<crit4 ~ '*',
                                       value>crit4 ~ ' ')) %>% 
       
       dplyr::select(model, location_name, location, value, forecast_date, target_variable, large_increase, increase, stable, decrease, large_decrease) %>%
