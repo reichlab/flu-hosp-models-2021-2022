@@ -12,7 +12,7 @@
 #' @param output3: path to write plot output file 
 
 #' @return exp_forecast:data frame in the format specified by CDC containing new cols with the change categories and their probabilities
-#' @examples \dontrun{suppressMessages(create_exp_target(models = c("UMass-trends_ensemble"),targets = c("2 wk ahead inc flu hosp"), source = "local_hub_repo", hub_repo="~/GitHub/flu-hosp-models-2021-2022",
+#' @examples \dontrun{suppressMessages(create_exp_target(models = c("UMass-trends_ensemble"), source = "local_hub_repo", hub_repo="~/GitHub/flu-hosp-models-2021-2022",
 #' data_processed="./weekly-submission/forecasts/", c_target="2 wk flu hosp rate change", output1="~/GitHub/Flusight-forecast-data/data-experimental/tests/",
 #' output2="~/GitHub/flu-hosp-models-2021-2022/weekly-submission/forecasts/data-experimental/tests/",output3="~/GitHub/flu-hosp-models-2021-2022/weekly-submission/forecasts/data-experimental/plots/tests/")}
 #' 
@@ -205,9 +205,9 @@ create_exp_target <- function(models,
     mutate(large_increase=1-cdf_crit1,
            increase=cdf_crit1-cdf_crit2,
            stable=case_when(crit3>0  ~ cdf_crit2-cdf_crit3,
-                            crit3<0 ~ cdf_crit2),
+                            crit3<=0 ~ cdf_crit2),
            decrease=case_when(crit3>0 & crit4 > 0 ~ cdf_crit3-cdf_crit4,
-                              crit3>0 & crit4 < 0 ~ cdf_crit3),
+                              crit3>0 & crit4 <= 0 ~ cdf_crit3),
            large_decrease=case_when(crit4>0 ~ cdf_crit4)) %>%
     select(forecast_date,location,location_name, large_increase,increase,stable,decrease,large_decrease)
   
@@ -265,3 +265,7 @@ create_exp_target <- function(models,
   dev.off()
   return (exp_t)
 }
+
+create_exp_target(models = c("UMass-trends_ensemble"),source = "local_hub_repo", hub_repo="~/GitHub/flu-hosp-models-2021-2022",
+data_processed="./weekly-submission/forecasts/", c_target="2 wk flu hosp rate change", output1="~/GitHub/Flusight-forecast-data/data-experimental/",
+output2="~/GitHub/flu-hosp-models-2021-2022/weekly-submission/forecasts/data-experimental/",output3="~/GitHub/flu-hosp-models-2021-2022/weekly-submission/forecasts/data-experimental/plots/")
