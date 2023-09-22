@@ -12,12 +12,14 @@ library(ggplot2)
 library(simplets)
 library(covidHubUtils)
 library(hubEnsembles)
+library(hubUtils)
 library(ggforce)
 library(furrr)
 # library(here)
 # setwd(here())
-source("./R/load_flu_hosp_data.R")
+# source("./R/load_flu_hosp_data.R")
 source("./R/fit_baseline_one_location.R")
+source("./R/as_scorable_forecasts.R")
 
 ncores <- future::availableCores()
 future::plan(multisession, workers = ncores - 1)
@@ -30,14 +32,17 @@ required_locations <-
   dplyr::select("location", "abbreviation")
 
 # The reference_date is the date of the Saturday relative to which week-ahead targets are defined.
-# The forecast_date is the Monday of forecast creation.
+# aka due_date (a wednesday) + 4, the Saturday of the current week
+# The due_date is the Wednesday of forecast creation and the day forecasts must be submitted.
+
 # This cannot be run on a later date unless source is set to covidcast with as_of == forecast_date
 reference_date <-
-  as.character(lubridate::floor_date(Sys.Date(), unit = "week") - 1)
-forecast_date <- as.character(as.Date(reference_date) + 2)
+  as.character(lubridate::ceiling_date(Sys.Date(), unit = "week") - 1)
+due_date <- as.character(as.Date(reference_date) - 4)
 
 # Load data
 daily_data <- covidData::load_data(
+#  as_of = due_date,
   spatial_resolution = c("national", "state"),
   temporal_resolution = "daily",
   measure = "flu hospitalizations",
@@ -70,7 +75,7 @@ weekly_data <- covidData::load_data(
     location_name = ifelse(location_name == "United States", "US", location_name),
     value = inc) %>%
   dplyr::filter(location != "60") %>%
-  dplyr::arrange(location, date)
+  dplyr::arrange(location, date) %>%
   # the previous lines reproduce the output of the current `load_flu_hosp_data` function
   # the following lines currently follow the call to `load_flu_hosp_data` in baseline.R
   dplyr::left_join(required_locations, by = "location") %>%
@@ -130,19 +135,20 @@ quantile_forecasts <-
         }) %>%
       dplyr::left_join(required_locations, by = "abbreviation") %>%
       dplyr::select(
-        forecast_date,
+        reference_date,
+        horizon,
         target,
         target_end_date,
         location,
-        type,
-        quantile,
+        output_type,
+        output_type_id,
         value,
-        model)
+        model_id)
     })
 
 model_number <- nrow(model_variations)
 model_names <-
-  c(unique(quantile_forecasts$model), "trends_ensemble")
+  c(unique(quantile_forecasts$model_id), "trends_ensemble")
 model_folders <- file.path(
   "weekly-submission/forecasts",
   paste0("UMass-", model_names)
@@ -160,7 +166,7 @@ for (folder in c(model_folders, plots_folders)) {
 results_paths <- file.path(
   model_folders,
   paste0(
-    forecast_date,
+    reference_date,
     "-UMass-",
     model_names,
     ".csv"))
@@ -168,75 +174,57 @@ results_paths <- file.path(
 plot_paths <- file.path(
   plots_folders,
   paste0(
-    forecast_date,
+    reference_date,
     "-UMass-",
     model_names,
     ".pdf"))
 
-# save all the baseline models in hub format
+# save all the baseline models in hub verse format
 for (i in 1:model_number) {
   model_name <- model_names[i]
   # set path
   results_path <- results_paths[i]
-  model_forecasts <-  quantile_forecasts %>%
-    dplyr::filter(model == model_name) %>%
-    dplyr::select(-"model")
+  model_forecasts <- quantile_forecasts %>%
+    dplyr::filter(model_id == model_name) %>%
+    dplyr::select(-"model_id")
   write.csv(model_forecasts, file = results_path, row.names = FALSE)
 }
 
-# load them back in to a single data.frame having columns required by
-# build_quantile_ensemble and plot_forecasts
-all_baselines <- covidHubUtils::load_forecasts_repo(
-  file_path = paste0("weekly-submission/forecasts/"),
-  models = paste0("UMass-", model_names[1:model_number]),
-  forecast_dates = forecast_date,
-  locations = NULL,
-  types = NULL,
-  targets = NULL,
-  hub = "FluSight",
-  verbose = TRUE
-)
 
 # build ensemble
-baseline_ensemble <- hubEnsembles::build_quantile_ensemble(
-  all_baselines,
-  forecast_date = forecast_date,
-  model_name = "baseline_ensemble"
-) %>%
+baseline_ensemble <- quantile_forecasts |>
+  as_model_out_tbl() |>
+  hubEnsembles::simple_ensemble(
+    agg_fun="median",
+    model_id = "UMass-trends_ensemble"
+  ) |>
   dplyr::mutate(
-    value = ifelse(
-      is.na(quantile) | quantile >= 0.5, ceiling(value), floor(value)
-    ))
+#    value = ifelse(is.na(output_type_id) | output_type_id >= 0.5, ceiling(value), floor(value)),
+  reference_date = as.Date(reference_date), target_end_date = as.Date(target_end_date)
+  )
+
 
 # save ensemble in hub format
-write.csv(
-  baseline_ensemble %>% dplyr::transmute(
-    forecast_date = forecast_date,
-    target = paste(horizon, temporal_resolution, "ahead", target_variable),
-    target_end_date = target_end_date,
-    location = location,
-    type = type,
-    quantile = quantile,
-    value = value
-  ),
-  file = results_paths[model_number + 1],
-  row.names = FALSE
-)
-
-# load ensemble back in and bind with other baselines for plotting
-all_baselines <- dplyr::bind_rows(
-  all_baselines,
-  covidHubUtils::load_forecasts_repo(
-    file_path = paste0("weekly-submission/forecasts/"),
-    models = "UMass-trends_ensemble",
-    forecast_dates = forecast_date,
-    locations = NULL,
-    types = NULL,
-    targets = NULL,
-    hub = "FluSight",
-    verbose = TRUE
-  )
-)
+#baseline_ensemble |>
+#  dplyr::select(-"model_id") |>
+#  write.csv(file=results_paths[model_number + 1], row.names=FALSE)
+  
+# bind all (baseline) models together and transform into CovidHubUtils format for plotting
+all_baselines <- quantile_forecasts |>
+  as_model_out_tbl() |>
+  dplyr::bind_rows(baseline_ensemble) |>
+  dplyr::mutate(
+    reference_date=as.Date(reference_date) - lubridate::weeks(2), 
+    horizon=as.character(horizon+2)
+  ) |>
+  as_scorable_forecasts(reference_date_col="reference_date", temp_res_col=NULL) |>
+  dplyr::left_join(covidHubUtils::hub_locations_flusight, by=c("location"="fips"))
+  
+forecasts_for_plotting <- all_baselines |>
+  dplyr::filter(quantile == 0.5) |>
+  dplyr::mutate(type = "point") |>
+  dplyr::bind_rows(all_baselines) |>
+  dplyr::mutate(target_end_date = as.Date(target_end_date))
 
 truth_for_plotting <- weekly_data %>%
   dplyr::mutate(abbreviation = toupper(geo_value)) %>%
@@ -255,7 +243,7 @@ plot_results <- furrr::future_map_lgl(
     plot_path <- plot_paths[i]
     p <-
       covidHubUtils::plot_forecasts(
-        forecast_data = all_baselines %>%
+        forecast_data = forecasts_for_plotting %>%
           dplyr::filter(model == paste0('UMass-',model_names[i])),
         facet = "~location",
         hub = "FluSight",

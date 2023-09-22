@@ -7,11 +7,11 @@
 #'
 get_quantiles_df <- function(predictions, taus) {
   n <- length(taus)
-  purrr::map_dfr(1:4,
+  purrr::map_dfr(1:5,
                  function(h) {
                    data.frame(
                      h = rep(h, n),
-                     quantile = taus,
+                     output_type_id = taus,
                      value = ceiling(quantile(predictions[, h], probs = taus))
                    )
                  })
@@ -93,7 +93,7 @@ get_baseline_predictions <- function(location_data,
   ## truncate to start at the first date of the first target week
   if (temporal_resolution == "daily") {
     predictions <-
-    sapply(1:4, function(i)
+    sapply(1: 5, function(i)
       rowSums(predictions[, ((7 * (i - 1)) + 1):(7 * i)])
     )
   }
@@ -163,11 +163,11 @@ fit_baseline_one_location <- function(reference_date,
   )
   # figure out daily horizons to forecast
   reference_date <- lubridate::ymd(reference_date)
-  forecast_date <- reference_date + 2
+  forecast_date <- reference_date - 14
   last_data_date <- max(location_data$time_value)
-  last_target_date <- forecast_date + 28L
+  last_target_date <- forecast_date + 35L
   effective_horizon <- as.integer(last_target_date - last_data_date)
-  h_adjustments <- as.integer(effective_horizon - 28L)
+  h_adjustments <- as.integer(effective_horizon - 35L)
 
   # set baseline variations to fit
   variations_to_fit <- tidyr::expand_grid(
@@ -230,7 +230,7 @@ fit_baseline_one_location <- function(reference_date,
     get_baseline_predictions,
     location_data = location_data,
     response_var = var,
-    horizons = ifelse(temporal_resolution == "daily", effective_horizon, 4),
+    horizons = ifelse(temporal_resolution == "daily", effective_horizon, 5),
     temporal_resolution = temporal_resolution,
     h_adjust = h_adjustments,
     taus = taus
@@ -240,15 +240,16 @@ fit_baseline_one_location <- function(reference_date,
     dplyr::bind_cols(variations_to_fit, predictions) %>%
     tidyr::unnest(quantiles_df) %>%
     dplyr::transmute(
-      forecast_date = as.character(forecast_date),
-      target = paste0(h, " wk ahead inc flu hosp"),
-      target_end_date = as.character(reference_date + 7L * h),
+      reference_date = as.character(reference_date),
+      horizon = h-2,
+      target = "wk ahead inc flu hosp",
+      target_end_date = as.character((forecast_date+14) + 7L * horizon),
       abbreviation = toupper(unique(location_data$geo_value)),
-      type = 'quantile',
-      quantile = quantile,
+      output_type = 'quantile',
+      output_type_id = output_type_id,
       value = value,
-      model = paste(
-        "baseline",
+      model_id = paste(
+        "UMass-baseline",
         transformation,
         ifelse(symmetrize, "sym", "nonsym"),
         window_size,
@@ -257,13 +258,13 @@ fit_baseline_one_location <- function(reference_date,
       )
     )
   # add point estimates
-  quantiles_df <- quantiles_df  %>%
-    dplyr::bind_rows(
-      .,
-      quantiles_df %>%
-        dplyr::filter(quantile == 0.5) %>%
-        mutate(type = 'point',
-               quantile = NA_real_)
-    )
+#  quantiles_df <- quantiles_df  %>%
+#    dplyr::bind_rows(
+#      .,
+#      quantiles_df %>%
+#        dplyr::filter(output_type_id == 0.5) %>%
+#        mutate(output_type = 'point',
+#               output_type_id = NA_real_)
+#    )
   return(quantiles_df)
 }
