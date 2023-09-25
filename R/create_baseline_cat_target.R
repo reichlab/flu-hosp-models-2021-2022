@@ -17,7 +17,6 @@ library(ggforce)
 library(furrr)
 # library(here)
 # setwd(here())
-source("./R/load_flu_hosp_data.R")
 source("./R/fit_baseline_one_location.R")
 source("./R/as_scorable_forecasts.R")
 
@@ -211,12 +210,10 @@ baseline_ensemble <- quantile_forecasts |>
   
 # bind all (baseline) models together and transform into CovidHubUtils format for plotting
 all_baselines <- quantile_forecasts |>
+  dplyr::mutate(reference_date = as.Date(reference_date), target_end_date = as.Date(target_end_date)) |>
   as_model_out_tbl() |>
   dplyr::bind_rows(baseline_ensemble) |>
-  dplyr::mutate(
-    reference_date=as.Date(reference_date) - lubridate::weeks(2), 
-    horizon=as.character(horizon+2)
-  ) |>
+  dplyr::mutate(reference_date=reference_date - lubridate::weeks(2), horizon=as.character(horizon+2)) |>
   as_scorable_forecasts(reference_date_col="reference_date", temp_res_col=NULL) |>
   dplyr::left_join(covidHubUtils::hub_locations_flusight, by=c("location"="fips"))
   
@@ -240,10 +237,10 @@ plot_results <- furrr::future_map_lgl(
   seq_len(model_number),
   function(i) {
     plot_path <- plot_paths[i]
-    p <-
+   p <-
       covidHubUtils::plot_forecasts(
         forecast_data = forecasts_for_plotting %>%
-          dplyr::filter(model == paste0('UMass-',model_names[i])),
+          dplyr::filter(model == model_names[i]),
         facet = "~location",
         hub = "FluSight",
         truth_data = truth_for_plotting,

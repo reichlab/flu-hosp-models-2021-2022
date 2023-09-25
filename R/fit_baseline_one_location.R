@@ -242,7 +242,7 @@ fit_baseline_one_location <- function(reference_date,
     dplyr::transmute(
       reference_date = as.character(reference_date),
       horizon = h-2,
-      target = "wk ahead inc flu hosp",
+      target = "wk inc flu hosp",
       target_end_date = as.character((forecast_date+14) + 7L * horizon),
       abbreviation = toupper(unique(location_data$geo_value)),
       output_type = 'quantile',
