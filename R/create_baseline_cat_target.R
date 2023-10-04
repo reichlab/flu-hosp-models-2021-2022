@@ -19,6 +19,7 @@ library(furrr)
 # setwd(here())
 source("./R/fit_baseline_one_location.R")
 source("./R/as_scorable_forecasts.R")
+source("./R/as_covid_hub_forecasts.R")
 
 ncores <- future::availableCores()
 future::plan(multisession, workers = ncores - 1)
@@ -49,11 +50,11 @@ daily_data <- covidData::load_data(
 ) %>%
   dplyr::left_join(covidData::fips_codes, by = "location") %>%
   dplyr::transmute(
-    date,
+    date=date+days(1),
     location,
     location_name = ifelse(location_name == "United States", "US", location_name),
     value = inc) %>%
-  dplyr::filter(location != "60") %>%
+  dplyr::filter(location %in% pull(required_locations, location)) %>%
   dplyr::arrange(location, date) %>%
   # the previous lines reproduce the output of the current `load_flu_hosp_data` function
   # the following lines currently follow the call to `load_flu_hosp_data` in baseline.R
@@ -61,26 +62,19 @@ daily_data <- covidData::load_data(
   dplyr::mutate(geo_value = tolower(abbreviation)) %>%
   dplyr::select(geo_value, time_value = date, value)
 
-weekly_data <- covidData::load_data(
-  spatial_resolution = c("national", "state"),
-  temporal_resolution = "weekly",
-  measure = "flu hospitalizations",
-  drop_last_date = FALSE
-) %>%
-  dplyr::left_join(covidData::fips_codes, by = "location") %>%
-  dplyr::transmute(
-    date,
-    location,
-    location_name = ifelse(location_name == "United States", "US", location_name),
-    value = inc) %>%
-  dplyr::filter(location != "60") %>%
-  dplyr::arrange(location, date) %>%
-  # the previous lines reproduce the output of the current `load_flu_hosp_data` function
-  # the following lines currently follow the call to `load_flu_hosp_data` in baseline.R
-  dplyr::left_join(required_locations, by = "location") %>%
-  dplyr::mutate(geo_value = tolower(abbreviation)) %>%
-  dplyr::select(geo_value, time_value = date, value)
+last_truth_saturday <- daily_data |>
+  dplyr::distinct(time_value, .keep_all = TRUE) |>
+  dplyr::slice_max(time_value, n = 7) |>
+  dplyr::mutate(day = lubridate::wday(time_value, label=TRUE, abbr=TRUE)) |>
+  dplyr::filter(day=="Sat") |>
+  dplyr::pull(time_value)
 
+weekly_data_new <- daily_data |>
+  dplyr::filter(time_value <= last_truth_saturday) |>
+  dplyr::mutate(associated_saturday = lubridate::ceiling_date(time_value, "week") - days(1)) |>
+  dplyr::group_by(geo_value, associated_saturday) |>
+  dplyr::summarize(week_value=sum(value)) |>
+  dplyr::transmute(geo_value, time_value=associated_saturday, value=week_value)
 
 location_number <- length(required_locations$abbreviation)
 
@@ -147,16 +141,10 @@ quantile_forecasts <-
 
 model_number <- nrow(model_variations)
 model_names <-
-  c(unique(quantile_forecasts$model_id), "trends_ensemble")
-model_folders <- file.path(
-  "weekly-submission/forecasts",
-  paste0("UMass-", model_names)
-)
+  c(unique(quantile_forecasts$model_id), "UMass-trends_ensemble")
+model_folders <- file.path("weekly-submission/forecasts", model_names)
 
-plots_folders <- file.path(
-  "weekly-submission/plots",
-  paste0("UMass-", model_names)
-)
+plots_folders <- file.path("weekly-submission/plots", model_names)
 
 for (folder in c(model_folders, plots_folders)) {
   if (!file.exists(folder)) dir.create(folder, recursive = TRUE)
@@ -166,7 +154,7 @@ results_paths <- file.path(
   model_folders,
   paste0(
     reference_date,
-    "-UMass-",
+    "-",
     model_names,
     ".csv"))
 
@@ -174,7 +162,7 @@ plot_paths <- file.path(
   plots_folders,
   paste0(
     reference_date,
-    "-UMass-",
+    "-",
     model_names,
     ".pdf"))
 
@@ -214,7 +202,8 @@ all_baselines <- quantile_forecasts |>
   as_model_out_tbl() |>
   dplyr::bind_rows(baseline_ensemble) |>
   dplyr::mutate(reference_date=reference_date - lubridate::weeks(2), horizon=as.character(horizon+2)) |>
-  as_scorable_forecasts(reference_date_col="reference_date", temp_res_col=NULL) |>
+  as_covid_hub_forecasts(reference_date_col="reference_date", temp_res_col=NULL) |>
+#  as_scorable_forecasts(reference_date_col="reference_date", temp_res_col=NULL) |>
   dplyr::left_join(covidHubUtils::hub_locations_flusight, by=c("location"="fips"))
   
 forecasts_for_plotting <- all_baselines |>
@@ -427,9 +416,9 @@ train_forecasts <- baseline_ensemble %>%
     
   #transpose data_frame to format for submission
   exp_t = melt(exp_forecast,id.vars = c("model_id","reference_date","location","location_name","horizon"),measure.vars = c("large_increase","increase","stable","decrease","large_decrease") , 
-               variable.name="output_type_id", value.name="value",na.rm = TRUE) 
+               variable.name="output_type_id", value.name="value") 
   exp_t <-exp_t %>%
-    mutate(target="wk flu hosp rate change", output_type="category")  %>%
+    mutate(target="wk flu hosp rate change", output_type="pmf", value=ifelse(is.na(value), 0, value))  %>%
     select(model_id, reference_date, horizon, target, location, location_name, output_type, output_type_id, value)
 
 #########################
@@ -443,7 +432,8 @@ trends_ensemble_submission <- exp_t |>
     target_end_date=reference_date+weeks(horizon)
   ) |>
   dplyr::bind_rows(mutate(baseline_ensemble, output_type_id=as.character(output_type_id)))|>
-  dplyr::select(-model_id)
+  dplyr::filter(location %in% pull(required_locations, location)) |>
+  dplyr::select(reference_date, horizon, target, target_end_date, location, output_type, output_type_id, value)
 
 readr::write_csv(trends_ensemble_submission,results_paths[17])
 
@@ -460,7 +450,7 @@ for (i in 1:length(the_locations)) {
                      truth_data=filter(truth_for_plotting, target_end_date>=prior_10wk_eval_sat),
                      location = the_locations[i],
                      target_variable="inc flu hosp",
-                     models=paste("UMass-", model_names[17], sep=""),
+                     models=model_names[17],
                      # facet = ~model, facet_scales = "fixed", title = "default",
                      show_caption = TRUE,
                      truth_source="HealthData",
