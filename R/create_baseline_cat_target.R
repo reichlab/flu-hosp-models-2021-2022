@@ -15,10 +15,10 @@ library(hubEnsembles)
 library(hubUtils)
 library(ggforce)
 library(furrr)
+library(lubridate)
 # library(here)
 # setwd(here())
 source("./R/fit_baseline_one_location.R")
-source("./R/as_scorable_forecasts.R")
 source("./R/as_covid_hub_forecasts.R")
 
 ncores <- future::availableCores()
@@ -46,7 +46,7 @@ daily_data <- covidData::load_data(
   spatial_resolution = c("national", "state"),
   temporal_resolution = "daily",
   measure = "flu hospitalizations",
-  drop_last_date = TRUE
+  drop_last_date = FALSE # changed from TRUE 
 ) %>%
   dplyr::left_join(covidData::fips_codes, by = "location") %>%
   dplyr::transmute(
@@ -69,7 +69,7 @@ last_truth_saturday <- daily_data |>
   dplyr::filter(day=="Sat") |>
   dplyr::pull(time_value)
 
-weekly_data_new <- daily_data |>
+weekly_data <- daily_data |>
   dplyr::filter(time_value <= last_truth_saturday) |>
   dplyr::mutate(associated_saturday = lubridate::ceiling_date(time_value, "week") - days(1)) |>
   dplyr::group_by(geo_value, associated_saturday) |>
@@ -195,17 +195,16 @@ baseline_ensemble <- quantile_forecasts |>
 #baseline_ensemble |>
 #  dplyr::select(-"model_id") |>
 #  write.csv(file=results_paths[model_number + 1], row.names=FALSE)
-  
+
 # bind all (baseline) models together and transform into CovidHubUtils format for plotting
 all_baselines <- quantile_forecasts |>
   dplyr::mutate(reference_date = as.Date(reference_date), target_end_date = as.Date(target_end_date)) |>
   as_model_out_tbl() |>
   dplyr::bind_rows(baseline_ensemble) |>
-  dplyr::mutate(reference_date=reference_date - lubridate::weeks(2), horizon=as.character(horizon+2)) |>
+  dplyr::mutate(reference_date=reference_date - lubridate::weeks(1), horizon=as.character(horizon+2)) |>
   as_covid_hub_forecasts(reference_date_col="reference_date", temp_res_col=NULL) |>
-#  as_scorable_forecasts(reference_date_col="reference_date", temp_res_col=NULL) |>
   dplyr::left_join(covidHubUtils::hub_locations_flusight, by=c("location"="fips"))
-  
+
 forecasts_for_plotting <- all_baselines |>
   dplyr::filter(quantile == 0.5) |>
   dplyr::mutate(type = "point") |>
@@ -295,32 +294,33 @@ library(dplyr)
 library(gridExtra)
 library (furrr)
 
-#models = c("UMass-trends_ensemble"); source = "local_hub_repo";  hub_repo="../flu-hosp-models-2021-2022"; 
-#data_processed="./weekly-submission/forecasts/";  c_target="wk flu hosp rate change";  output1="../Flusight-forecast-data/data-experimental/"; 
+#models = c("UMass-trends_ensemble"); source = "local_hub_repo";  hub_repo="../flu-hosp-models-2021-2022";
+#data_processed="./weekly-submission/forecasts/";  c_target="wk flu hosp rate change";  output1="../Flusight-forecast-data/data-experimental/";
 #output2="../flu-hosp-models-2021-2022/weekly-submission/forecasts/data-experimental/"; output3="../flu-hosp-models-2021-2022/weekly-submission/forecasts/data-experimental/plots/"
 
 #Important dates used
 # last_eval_sat <- as.Date(calc_target_week_end_date(Sys.Date(), horizon = 0))
-#  last_eval_sat <- as.Date(calc_target_week_end_date(Sys.Date(), horizon = 0))-7 # for debugging if run Tuesday-Sunday
-last_eval_sat <- as.Date(calc_target_week_end_date(Sys.Date(), horizon = 0))-14 # for out-of-season
+last_eval_sat <- as.Date(calc_target_week_end_date(Sys.Date(), horizon = 0))-7 # for debugging if run Tuesday-Sunday
+# last_eval_sat <- as.Date(calc_target_week_end_date(Sys.Date(), horizon = 0))-14 # for out-of-season
 this_monday=last_eval_sat+2
 prior_eval_sat=last_eval_sat-7
 prior_10wk_eval_sat=last_eval_sat-70
-  
-## load location data 
+
+## load location data
 location_data <- readr::read_csv(file = "../Flusight-forecast-hub/auxiliary-data/locations.csv") |>
-  dplyr::mutate(geo_value = tolower(abbreviation)) |> 
+  dplyr::mutate(geo_value = tolower(abbreviation)) |>
   dplyr::select(-abbreviation, -5)
 
-weekly_data_all <- weekly_data |> 
-  dplyr::rename(target_end_date = time_value) |> 
+weekly_data_all <- weekly_data |>
+  dplyr::rename(target_end_date = time_value) |>
+  dplyr::ungroup() |>
   tidyr::expand(target_end_date, geo_value, horizon = -1:3) |>
   dplyr::left_join(weekly_data, by=c("target_end_date"="time_value", "geo_value"))|>
   dplyr::inner_join(location_data, by = c("geo_value"))  |>
   dplyr::mutate(model_id="Observed Data (HealthData)", target_variable="inc flu hosp", .before=1) |>
-  
+
   #  CRIT1 Large increase: positive forecasted rate changes larger than or equal to LI/100k,
-  # where LI = {2,3,4,5,5} AND the count change is larger than 10+LI/100k. 
+  # where LI = {2,3,4,5,5} AND the count change is larger than 10+LI/100k.
   mutate(crit1=case_when(horizon == -1 & count_rate2 >= 10 ~ value+count_rate2,
                          horizon == -1 & count_rate2 < 10 ~ value + 10 + count_rate2,
                          horizon == 0 & count_rate3 >= 10 ~ value + count_rate3,
@@ -329,27 +329,27 @@ weekly_data_all <- weekly_data |>
                          horizon == 1 & count_rate4 < 10 ~ value + 10 + count_rate4,
                          horizon >= 2 & count_rate5 >= 10 ~ value + count_rate5,
                          horizon >= 2 & count_rate5 < 10 ~ value + 10 + count_rate5)) %>%
-    
+
   #  CRIT2 Increase: positive forecasted rate changes larger than or equal to I/100k,
-  # where I = {1,1,2,2.5,2.5} AND the count change is larger than 10. 
+  # where I = {1,1,2,2.5,2.5} AND the count change is larger than 10.
   mutate(crit2=case_when(horizon < 2 & count_rate1 >= 10 ~ value+count_rate1,
                          horizon < 2 & count_rate1 < 10 ~ value + 10,
                          horizon == 2 & count_rate2 >= 10 ~ value + count_rate2,
                          horizon == 2 & count_rate2 < 10 ~ value + 10,
                          horizon >= 2 & count_rate2p5 >= 10 ~ value + count_rate2p5,
                          horizon >= 2 & count_rate2p5 < 10 ~ value + 10)) %>%
-  
+
   #  CRIT3 Decrease: Negative forecasted rate changes larger than or equal to D/100k,
-  # where D = {1,1,2,2.5,2.5} AND the count change is larger than 10. 
+  # where D = {1,1,2,2.5,2.5} AND the count change is larger than 10.
   mutate(crit3=case_when(horizon < 2 & count_rate1 >= 10 ~ value - count_rate1,
                          horizon < 2 & count_rate1 < 10 ~ value - 10,
                          horizon == 2 & count_rate2 >= 10 ~ value - count_rate2,
                          horizon == 2 & count_rate2 < 10 ~ value - 10,
                          horizon >= 2 & count_rate2p5 >= 10 ~ value - count_rate2p5,
                          horizon >= 2 & count_rate2p5 < 10 ~ value - 10)) %>%
-    
+
   #  CRIT4 Large Decrease: Negative forecasted rate changes larger than or equal to LI/100k,
-  # where LD = {2,3,4,5,5} AND the count change is larger than 10+LD/100k. 
+  # where LD = {2,3,4,5,5} AND the count change is larger than 10+LD/100k.
   mutate(crit4=case_when(horizon == -1 & count_rate2 >= 10 ~ value - count_rate2,
                          horizon == -1 & count_rate2 < 10 ~ value - 10 - count_rate2,
                          horizon == 0 & count_rate3 >= 10 ~ value - count_rate3,
@@ -357,20 +357,20 @@ weekly_data_all <- weekly_data |>
                          horizon == 1 & count_rate3 >= 10 ~ value - count_rate3,
                          horizon == 1 & count_rate3 < 10 ~ value - 10 - count_rate4,
                          horizon >= 2 & count_rate5 >= 10 ~ value - count_rate5,
-                         horizon >= 2 & count_rate5 < 10 ~ value - 10 - count_rate5)) %>% 
+                         horizon >= 2 & count_rate5 < 10 ~ value - 10 - count_rate5)) %>%
 
   dplyr::select(model_id, location_name, location, value, target_end_date, horizon,target_variable, population, count_rate1:count_rate5, crit1, crit2, crit3, crit4) |>
   dplyr::filter(!is.na(value))
 
   #filter most recent truth
-recent_date <- ifelse(last_eval_sat %in% unique(weekly_data$time_value), last_eval_sat, max(weekly_data$time_value))  
-weekly_data_recent <-  weekly_data_all %>% 
+recent_date <- ifelse(last_eval_sat %in% unique(weekly_data$time_value), last_eval_sat, max(weekly_data$time_value))
+weekly_data_recent <-  weekly_data_all %>%
   filter(target_end_date == recent_date) %>%
   mutate(date = reference_date)  %>%
   dplyr::select(location, location_name, date, horizon, data_value=value, population, count_rate1:count_rate5, crit1, crit2, crit3, crit4)
 
 # list of locations
-the_locations <- weekly_data_recent %>%  
+the_locations <- weekly_data_recent %>%
   distinct(location, .keep_all=TRUE) %>%
   pull(location) #states, us and territories
 
@@ -413,10 +413,10 @@ train_forecasts <- baseline_ensemble %>%
                               crit3>0 & crit4 <= 0 ~ cdf_crit3),
            large_decrease=case_when(crit4>0 ~ cdf_crit4)) %>%
     select(model_id,reference_date,location,location_name, horizon, large_increase,increase,stable,decrease,large_decrease)
-    
+
   #transpose data_frame to format for submission
-  exp_t = melt(exp_forecast,id.vars = c("model_id","reference_date","location","location_name","horizon"),measure.vars = c("large_increase","increase","stable","decrease","large_decrease") , 
-               variable.name="output_type_id", value.name="value") 
+  exp_t = melt(exp_forecast,id.vars = c("model_id","reference_date","location","location_name","horizon"),measure.vars = c("large_increase","increase","stable","decrease","large_decrease") ,
+               variable.name="output_type_id", value.name="value")
   exp_t <-exp_t %>%
     mutate(target="wk flu hosp rate change", output_type="pmf", value=ifelse(is.na(value), 0, value))  %>%
     select(model_id, reference_date, horizon, target, location, location_name, output_type, output_type_id, value)
@@ -439,13 +439,13 @@ readr::write_csv(trends_ensemble_submission,results_paths[17])
 
 #######################################################
 # Plot original forecasts and Experimental forecasts
-####################################################### 
+#######################################################
 
 #open PDF
 pdf(file=plot_paths[17],paper='a4r')
 # pdf(file=destination)
 for (i in 1:length(the_locations)) {
-  p1<-plot_forecasts(forecast_data=forecasts_for_plotting, 
+  p1<-plot_forecasts(forecast_data=forecasts_for_plotting,
                      hub = 'FluSight',
                      truth_data=filter(truth_for_plotting, target_end_date>=prior_10wk_eval_sat),
                      location = the_locations[i],
@@ -456,16 +456,16 @@ for (i in 1:length(the_locations)) {
                      truth_source="HealthData",
                      title='Inc Flu Hosp',
                      plot=FALSE) +
-    theme(legend.position = c(.05,.95), legend.justification = c(0,1), legend.key = element_rect(colour = "transparent", fill = "white"), 
+    theme(legend.position = c(.05,.95), legend.justification = c(0,1), legend.key = element_rect(colour = "transparent", fill = "white"),
           legend.background = element_rect(alpha("white", 0.5)), legend.box="horizontal")
-    
+
     exp_t_1 <-exp_t  %>%
       filter(location== the_locations[i])
-    
+
     p2 <- ggplot(exp_t_1, aes(fill=output_type_id, y=value, x=horizon)) +
       geom_bar(position="stack", stat="identity") +
-      labs(title='Flu Hosp Rate Change') 
-    
+      labs(title='Flu Hosp Rate Change')
+
     grid.arrange(p1,p2,nrow=1, widths = c(5,3))
   }
   dev.off()

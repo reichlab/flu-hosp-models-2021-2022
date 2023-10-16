@@ -163,7 +163,7 @@ fit_baseline_one_location <- function(reference_date,
   )
   # figure out daily horizons to forecast
   reference_date <- lubridate::ymd(reference_date)
-  forecast_date <- reference_date - 14
+  forecast_date <- reference_date - 7
   last_data_date <- max(location_data$time_value)
   last_target_date <- forecast_date + 35L
   effective_horizon <- as.integer(last_target_date - last_data_date)
@@ -243,7 +243,7 @@ fit_baseline_one_location <- function(reference_date,
       reference_date = as.character(reference_date),
       horizon = h-2,
       target = "wk inc flu hosp",
-      target_end_date = as.character((forecast_date+14) + 7L * horizon),
+      target_end_date = as.character((forecast_date+7) + 7L * horizon),
       abbreviation = toupper(unique(location_data$geo_value)),
       output_type = 'quantile',
       output_type_id = output_type_id,
