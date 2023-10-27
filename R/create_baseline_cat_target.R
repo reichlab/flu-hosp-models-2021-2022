@@ -202,6 +202,7 @@ all_baselines <- quantile_forecasts |>
   as_model_out_tbl() |>
   dplyr::bind_rows(baseline_ensemble) |>
   dplyr::mutate(reference_date=reference_date - lubridate::weeks(1), horizon=as.character(horizon+2)) |>
+#  dplyr::mutate(reference_date=reference_date - lubridate::weeks(2), horizon=as.character(horizon+2)) |>
   as_covid_hub_forecasts(reference_date_col="reference_date", temp_res_col=NULL) |>
   dplyr::left_join(covidHubUtils::hub_locations_flusight, by=c("location"="fips"))
 
