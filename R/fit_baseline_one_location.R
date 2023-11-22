@@ -7,7 +7,7 @@
 #'
 get_quantiles_df <- function(predictions, taus) {
   n <- length(taus)
-  purrr::map_dfr(1:5,
+  purrr::map_dfr(1:4,
                  function(h) {
                    data.frame(
                      h = rep(h, n),
@@ -93,7 +93,7 @@ get_baseline_predictions <- function(location_data,
   ## truncate to start at the first date of the first target week
   if (temporal_resolution == "daily") {
     predictions <-
-    sapply(1: 5, function(i)
+    sapply(1:4, function(i)
       rowSums(predictions[, ((7 * (i - 1)) + 1):(7 * i)])
     )
   }
@@ -166,9 +166,9 @@ fit_baseline_one_location <- function(reference_date,
   forecast_date <- reference_date - 7
 #  forecast_date <- reference_date - 14
   last_data_date <- max(location_data$time_value)
-  last_target_date <- forecast_date + 35L
+  last_target_date <- forecast_date + 28L
   effective_horizon <- as.integer(last_target_date - last_data_date)
-  h_adjustments <- as.integer(effective_horizon - 35L)
+  h_adjustments <- as.integer(effective_horizon - 28L)
 
   # set baseline variations to fit
   variations_to_fit <- tidyr::expand_grid(
@@ -231,7 +231,7 @@ fit_baseline_one_location <- function(reference_date,
     get_baseline_predictions,
     location_data = location_data,
     response_var = var,
-    horizons = ifelse(temporal_resolution == "daily", effective_horizon, 5),
+    horizons = ifelse(temporal_resolution == "daily", effective_horizon, 4),
     temporal_resolution = temporal_resolution,
     h_adjust = h_adjustments,
     taus = taus
@@ -242,7 +242,7 @@ fit_baseline_one_location <- function(reference_date,
     tidyr::unnest(quantiles_df) %>%
     dplyr::transmute(
       reference_date = as.character(reference_date),
-      horizon = h-2,
+      horizon = h-1,
       target = "wk inc flu hosp",
       target_end_date = as.character((forecast_date+7) + 7L * horizon),
 #      target_end_date = as.character((forecast_date+14) + 7L * horizon),

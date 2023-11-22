@@ -69,6 +69,8 @@ last_truth_saturday <- daily_data |>
   dplyr::filter(day=="Sat") |>
   dplyr::pull(time_value)
 
+last_truth_saturday
+
 weekly_data <- daily_data |>
   dplyr::filter(time_value <= last_truth_saturday) |>
   dplyr::mutate(associated_saturday = lubridate::ceiling_date(time_value, "week") - days(1)) |>
@@ -315,51 +317,50 @@ location_data <- readr::read_csv(file = "../Flusight-forecast-hub/auxiliary-data
 weekly_data_all <- weekly_data |>
   dplyr::rename(target_end_date = time_value) |>
   dplyr::ungroup() |>
-  tidyr::expand(target_end_date, geo_value, horizon = -1:3) |>
+  tidyr::expand(target_end_date, geo_value, horizon = 0:3) |>
   dplyr::left_join(weekly_data, by=c("target_end_date"="time_value", "geo_value"))|>
   dplyr::inner_join(location_data, by = c("geo_value"))  |>
   dplyr::mutate(model_id="Observed Data (HealthData)", target_variable="inc flu hosp", .before=1) |>
 
   #  CRIT1 Large increase: positive forecasted rate changes larger than or equal to LI/100k,
   # where LI = {2,3,4,5,5} AND the count change is larger than 10+LI/100k.
-  mutate(crit1=case_when(horizon == -1 & count_rate2 >= 10 ~ value+count_rate2,
-                         horizon == -1 & count_rate2 < 10 ~ value + 10 + count_rate2,
-                         horizon == 0 & count_rate3 >= 10 ~ value + count_rate3,
-                         horizon == 0 & count_rate3 < 10 ~ value + 10 + count_rate3,
-                         horizon == 1 & count_rate4 >= 10 ~ value + count_rate4,
-                         horizon == 1 & count_rate4 < 10 ~ value + 10 + count_rate4,
-                         horizon >= 2 & count_rate5 >= 10 ~ value + count_rate5,
-                         horizon >= 2 & count_rate5 < 10 ~ value + 10 + count_rate5)) %>%
+  mutate(crit1=case_when(horizon <= 0 & count_rate2 >= 10 ~ value+count_rate2,
+                         horizon <= 0 & count_rate2 < 10 ~ value + 10 + count_rate2,
+                         horizon == 1 & count_rate3 >= 10 ~ value + count_rate3,
+                         horizon == 1 & count_rate3 < 10 ~ value + 10 + count_rate3,
+                         horizon == 2 & count_rate4 >= 10 ~ value + count_rate4,
+                         horizon == 2 & count_rate4 < 10 ~ value + 10 + count_rate4,
+                         horizon >= 3 & count_rate5 >= 10 ~ value + count_rate5,
+                         horizon >= 3 & count_rate5 < 10 ~ value + 10 + count_rate5)) %>%
 
   #  CRIT2 Increase: positive forecasted rate changes larger than or equal to I/100k,
   # where I = {1,1,2,2.5,2.5} AND the count change is larger than 10.
-  mutate(crit2=case_when(horizon < 2 & count_rate1 >= 10 ~ value+count_rate1,
-                         horizon < 2 & count_rate1 < 10 ~ value + 10,
+  mutate(crit2=case_when(horizon <= 1 & count_rate1 >= 10 ~ value + count_rate1,
+                         horizon <= 1 & count_rate1 < 10 ~ value + 10,
                          horizon == 2 & count_rate2 >= 10 ~ value + count_rate2,
                          horizon == 2 & count_rate2 < 10 ~ value + 10,
-                         horizon >= 2 & count_rate2p5 >= 10 ~ value + count_rate2p5,
-                         horizon >= 2 & count_rate2p5 < 10 ~ value + 10)) %>%
+                         horizon >= 3 & count_rate2p5 >= 10 ~ value + count_rate2p5,
+                         horizon >= 3 & count_rate2p5 < 10 ~ value + 10)) %>%
 
   #  CRIT3 Decrease: Negative forecasted rate changes larger than or equal to D/100k,
   # where D = {1,1,2,2.5,2.5} AND the count change is larger than 10.
-  mutate(crit3=case_when(horizon < 2 & count_rate1 >= 10 ~ value - count_rate1,
-                         horizon < 2 & count_rate1 < 10 ~ value - 10,
+  mutate(crit3=case_when(horizon <= 1 & count_rate1 >= 10 ~ value - count_rate1,
+                         horizon <= 1 & count_rate1 < 10 ~ value - 10,
                          horizon == 2 & count_rate2 >= 10 ~ value - count_rate2,
                          horizon == 2 & count_rate2 < 10 ~ value - 10,
-                         horizon >= 2 & count_rate2p5 >= 10 ~ value - count_rate2p5,
-                         horizon >= 2 & count_rate2p5 < 10 ~ value - 10)) %>%
+                         horizon >= 3 & count_rate2p5 >= 10 ~ value - count_rate2p5,
+                         horizon >= 3 & count_rate2p5 < 10 ~ value - 10)) %>%
 
   #  CRIT4 Large Decrease: Negative forecasted rate changes larger than or equal to LI/100k,
   # where LD = {2,3,4,5,5} AND the count change is larger than 10+LD/100k.
-  mutate(crit4=case_when(horizon == -1 & count_rate2 >= 10 ~ value - count_rate2,
-                         horizon == -1 & count_rate2 < 10 ~ value - 10 - count_rate2,
-                         horizon == 0 & count_rate3 >= 10 ~ value - count_rate3,
-                         horizon == 0 & count_rate3 < 10 ~ value - 10 - count_rate3,
+  mutate(crit4=case_when(horizon <= 0 & count_rate2 >= 10 ~ value - count_rate2,
+                         horizon <= 0 & count_rate2 < 10 ~ value - 10 - count_rate2,
                          horizon == 1 & count_rate3 >= 10 ~ value - count_rate3,
-                         horizon == 1 & count_rate3 < 10 ~ value - 10 - count_rate4,
-                         horizon >= 2 & count_rate5 >= 10 ~ value - count_rate5,
-                         horizon >= 2 & count_rate5 < 10 ~ value - 10 - count_rate5)) %>%
-
+                         horizon == 1 & count_rate3 < 10 ~ value - 10 - count_rate3,
+                         horizon == 2 & count_rate3 >= 10 ~ value - count_rate3,
+                         horizon == 2 & count_rate3 < 10 ~ value - 10 - count_rate4,
+                         horizon >= 3 & count_rate5 >= 10 ~ value - count_rate5,
+                         horizon >= 3 & count_rate5 < 10 ~ value - 10 - count_rate5)) %>%
   dplyr::select(model_id, location_name, location, value, target_end_date, horizon,target_variable, population, count_rate1:count_rate5, crit1, crit2, crit3, crit4) |>
   dplyr::filter(!is.na(value))
 
